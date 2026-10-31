@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Swordfish</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="logo">◆</span> Swordfish <span class="muted">· strategy bots on HashKey Chain</span></div>
+    <div id="account"></div>
+  </header>
+  <nav>
+    <button data-tab="leaderboard" class="active">Leaderboard</button>
+    <button data-tab="mine">My bots</button>
+    <button data-tab="strategies">Strategies</button>
+  </nav>
+  <main>
+    <section id="leaderboard">
+      <div class="row">
+        <h2>Leaderboard</h2>
+        <div class="toggle" id="mode">
+          <button data-mode="paper" class="active">Paper</button>
+          <button data-mode="live">Live</button>
+        </div>
+      </div>
+      <p class="muted">Ranked by P&amp;L after costs: cash plus what positions would sell for in the pools now, minus gas.</p>
+      <div class="table-wrap"><table id="board"></table></div>
+    </section>
+
+    <section id="mine" hidden>
+      <div id="login-note" class="card" hidden></div>
+      <div id="wallet" class="card" hidden></div>
+      <div class="row"><h2>My bots</h2></div>
+      <div id="my-bots" class="grid"></div>
+      <form id="new-bot" class="card" hidden>
+        <h3>New paper bot</h3>
+        <label>Strategy <select name="strategy"></select></label>
+        <fieldset><legend>Assets</legend>
+          <label class="inline"><input type="checkbox" name="assets" value="btc" checked> BTC</label>
+          <label class="inline"><input type="checkbox" name="assets" value="eth" checked> ETH</label>
+          <label class="inline"><input type="checkbox" name="assets" value="hsk"> HSK</label>
+        </fieldset>
+        <label>Timeframe
+          <select name="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
+        </label>
+        <div class="params">
+          <label>Trade size $ <input name="tradeUsd" type="number" min="1" step="1" placeholder="20"></label>
+          <label>Stop loss % <input name="stopLossPct" type="number" min="0" step="0.5" placeholder="off"></label>
+          <label>Take profit % <input name="takeProfitPct" type="number" min="0" step="0.5" placeholder="off"></label>
+          <label>Trailing stop % <input name="trailingStopPct" type="number" min="0" step="0.5" placeholder="off"></label>
+        </div>
+        <button type="submit" class="primary">Create bot</button>
+        <p class="muted small">Bots start on paper. Switch one to real funds in Telegram with <code>/live &lt;id&gt; &lt;budget&gt;</code>.</p>
+        <p id="form-error" class="error"></p>
+      </form>
+    </section>
+
+    <section id="strategies" hidden>
+      <h2>Strategies</h2>
+      <div id="strategy-list" class="grid"></div>
+    </section>
+  </main>
+
+  <dialog id="detail"><div id="detail-body"></div><form method="dialog"><button class="close">Close</button></form></dialog>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

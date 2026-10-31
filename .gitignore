@@ -1,0 +1,16 @@
+node_modules
+.env
+.env.*
+!.env.example
+
+# Local state: paper books, bot database (holds encrypted wallet keys)
+data/paper-*.json
+data/*.db
+data/*.db-*
+
+# Claude Code / private notes
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+*.local.md
+notes/
