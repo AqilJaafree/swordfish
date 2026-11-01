@@ -4,7 +4,7 @@
 import { Bot, GrammyError, HttpError } from 'grammy'
 import { config, telegramAllowed } from './config.mjs'
 import * as db from './db.mjs'
-import { catalog, closeBot, createBotFor, events, goLive, ownedBot, RISK_DEFAULTS, setStatus, walletBalances, withdraw } from './engine.mjs'
+import { catalog, closeBot, createBotFor, deleteBot, deleteWallet, events, goLive, importWallet, ownedBot, RISK_DEFAULTS, setStatus, walletBalances, withdraw, withdrawAll } from './engine.mjs'
 import { createWallet, exportKey } from './vault.mjs'
 
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
@@ -21,11 +21,15 @@ const HELP = `<b>Swordfish</b>: strategy bots on HashKey Chain.
 /bots: your bots
 /bot &lt;id&gt;: details and recent trades
 /stop &lt;id&gt; · /resume &lt;id&gt; · /close &lt;id&gt; (sell all and stop)
+/deletebot &lt;id&gt;: delete a bot and its history
 /live &lt;id&gt; &lt;budgetUSDT&gt;: switch a bot to real money
 /leaderboard: top bots
 /web: log in to the dashboard
-/withdraw &lt;asset&gt; &lt;amount&gt; &lt;address&gt;
+/withdraw &lt;asset&gt; &lt;amount|max&gt; &lt;address&gt;
+/withdraw all &lt;address&gt;: send everything out
 /export: reveal your wallet private key
+/importwallet &lt;privateKey&gt;: use your own wallet instead
+/deletewallet: delete your bot wallet
 
 New bots paper-trade with $${config.bots.paperStartUsdt}. Live bots trade real funds from your wallet.`
 
@@ -60,6 +64,7 @@ export function startTelegram() {
   bot.use(async (ctx, next) => {
     const cmd = ctx.message?.text?.split(/[\s@]/)[0]
     if (ctx.chat?.type !== 'private' && cmd && !['/leaderboard', '/strategies', '/help'].includes(cmd)) {
+      if (cmd === '/importwallet') await ctx.deleteMessage().catch(() => {})
       return reply(ctx, 'Message me privately for wallet and bot commands.')
     }
     return next()
@@ -127,7 +132,7 @@ export function startTelegram() {
     const b = ownedBot(userOf(ctx), args(ctx)[0])
     await reply(ctx, `Closing bot #${b.id}: selling all positions...`)
     const results = await closeBot(b)
-    await reply(ctx, results.map((r) => (r.error ? `${r.asset}: failed, ${esc(r.error)}` : `sold ${r.asset} for ${usd(r.usdt)}`)).join('\n') || 'No positions. Bot stopped.')
+    await reply(ctx, results.map((r) => (r.error ? `${r.asset}: failed, ${esc(r.error)}` : `${r.side === 'buy' ? 'bought' : 'sold'} ${r.asset} for ${usd(r.usdt)}`)).join('\n') || 'No positions. Bot stopped.')
   })
 
   bot.command('live', async (ctx) => {
@@ -161,13 +166,80 @@ export function startTelegram() {
     await reply(ctx, `One-time login link (10 min):\n${config.webUrl}/auth/login?token=${token}`)
   })
 
+  const sent = (r) => (r.error ? `${r.asset.toUpperCase()}: ${esc(r.error)}` : `${r.amount} ${r.asset.toUpperCase()} ${r.status}: <a href="${explorer(`tx/${r.hash}`)}">${r.hash.slice(0, 14)}…</a>`)
   bot.command('withdraw', async (ctx) => {
     const user = userOf(ctx)
-    const [asset, amount, to, confirm] = args(ctx)
-    if (!to) return reply(ctx, 'Usage: <code>/withdraw usdt 25 0xYourAddress</code>')
+    const a = args(ctx)
+    if (a[0]?.toLowerCase() === 'all') {
+      const [, to, confirm] = a
+      if (!to) return reply(ctx, 'Usage: <code>/withdraw all 0xYourAddress</code>')
+      if (confirm !== 'confirm') {
+        return reply(ctx, `Send <b>everything</b> in your bot wallet (USDT, WBTC, WETH, then HSK minus gas) to <code>${esc(to)}</code>? Funds used by running live bots stay.\nReply <code>/withdraw all ${esc(to)} confirm</code>`)
+      }
+      await reply(ctx, 'Withdrawing…')
+      const results = await withdrawAll(user, to)
+      return reply(ctx, results.map(sent).join('\n') || 'Nothing to withdraw.')
+    }
+    const [asset, amount, to, confirm] = a
+    if (!to) return reply(ctx, 'Usage: <code>/withdraw usdt 25 0xYourAddress</code> (amount or <code>max</code>), or <code>/withdraw all 0xYourAddress</code>')
     if (confirm !== 'confirm') return reply(ctx, `Send ${esc(amount)} ${esc(asset)} to <code>${esc(to)}</code>?\nReply <code>/withdraw ${esc(asset)} ${esc(amount)} ${esc(to)} confirm</code>`)
-    const r = await withdraw(user, asset, amount, to)
-    await reply(ctx, `Withdrawal ${r.status}: <a href="${explorer(`tx/${r.hash}`)}">${r.hash.slice(0, 18)}…</a>`)
+    await reply(ctx, sent(await withdraw(user, asset, amount, to)))
+  })
+
+  bot.command('deletebot', async (ctx) => {
+    const [id, confirm] = args(ctx)
+    if (!id) return reply(ctx, 'Usage: <code>/deletebot 7</code>')
+    const b = ownedBot(userOf(ctx), id)
+    if (confirm !== 'confirm') {
+      return reply(ctx, `Delete bot #${b.id} <b>${esc(b.name)}</b> (${b.mode.toUpperCase()}, ${b.trades} trades) and its history? It leaves the leaderboard.\nReply <code>/deletebot ${b.id} confirm</code>`)
+    }
+    await deleteBot(b)
+    await reply(ctx, `Bot #${b.id} deleted.`)
+  })
+
+  bot.command('importwallet', async (ctx) => {
+    const [key] = args(ctx)
+    // The key is in the user's message: delete it before doing anything else.
+    if (key) await ctx.deleteMessage().catch(() => {})
+    if (!key) {
+      return reply(
+        ctx,
+        'Use your own wallet for bots: <code>/importwallet 0xYourPrivateKey</code>\n\n' +
+          '• Use a wallet made for trading, not your main one: the key passes through Telegram.\n' +
+          '• Your message is deleted right away and the key is stored encrypted.\n' +
+          '• Your current bot wallet must be empty with no live bots (withdraw it first).',
+      )
+    }
+    try {
+      const r = await importWallet(userOf(ctx), key)
+      await reply(ctx, `✅ Imported <code>${r.address}</code> (your message with the key was deleted).\nBalances: ${Object.entries(r.balances).map(([k, v]) => `${v} ${k.toUpperCase()}`).join(' · ')}`)
+    } catch (err) {
+      // Never echo the key: errors from importWallet don't contain it.
+      const balances = err.balances ? '\nWithdraw first with <code>/withdraw all 0xYourAddress</code>, then import again.' : ''
+      await reply(ctx, `Import failed: ${esc(err.message)}.${balances}${/key/i.test(err.message) ? '' : '\nYour message with the key was deleted.'}`)
+    }
+  })
+
+  bot.command('deletewallet', async (ctx) => {
+    const user = userOf(ctx)
+    const w = db.getWallet(user.id)
+    const [confirm, abandon] = args(ctx)
+    if (confirm !== 'confirm') {
+      const bal = await walletBalances(w.address)
+      return reply(
+        ctx,
+        `⚠️ This permanently deletes the key for <code>${w.address}</code>. Swordfish cannot recover it.\n` +
+          `Balances: ${Object.entries(bal).map(([k, v]) => `${v} ${k.toUpperCase()}`).join(' · ')}\n\n` +
+          `1. Move funds out: <code>/withdraw all 0xYourAddress</code> (or save the key with /export)\n2. Delete live bots: /deletebot\n3. Send <code>/deletewallet confirm</code>\n\nYour next command creates a fresh wallet.`,
+      )
+    }
+    try {
+      const r = await deleteWallet(user, { abandonFunds: abandon === 'abandon' })
+      await reply(ctx, `Wallet <code>${r.address}</code> deleted${r.abandoned.length ? `; left behind ${r.abandoned.map(([k, v]) => `${v} ${k.toUpperCase()}`).join(', ')}` : ''}. Send /wallet for a new one.`)
+    } catch (err) {
+      if (!err.balances) throw err
+      await reply(ctx, `${esc(err.message)}.\nWithdraw first with <code>/withdraw all 0xYourAddress</code>. To delete anyway and leave the funds (reachable only with a key saved via /export), send <code>/deletewallet confirm abandon</code>.`)
+    }
   })
 
   bot.command('export', async (ctx) => {
@@ -207,6 +279,8 @@ export function startTelegram() {
     { command: 'strategies', description: 'Available strategies' },
     { command: 'newbot', description: 'Create a paper bot' },
     { command: 'bots', description: 'Your bots' },
+    { command: 'deletebot', description: 'Delete a bot' },
+    { command: 'withdraw', description: 'Send funds out of your bot wallet' },
     { command: 'leaderboard', description: 'Top bots' },
     { command: 'web', description: 'Dashboard login link' },
     { command: 'help', description: 'All commands' },

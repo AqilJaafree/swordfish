@@ -17,4 +17,13 @@ export default {
     if (close < low && position > 0) return { side: 'sell', fraction: 1, reason: `breakdown: ${state}` }
     return { reason: `inside channel: ${state}` }
   },
+  levels({ candles, params }) {
+    // Same windows as decide(): everything before the current candle.
+    const prior = candles.slice(0, -1)
+    if (prior.length < params.entry) return []
+    return [
+      { side: 'buy', label: `Buy above ${params.entry}-high`, price: Math.max(...prior.slice(-params.entry).map((c) => c.high)) },
+      { side: 'sell', label: `Sell below ${params.exit}-low`, price: Math.min(...prior.slice(-params.exit).map((c) => c.low)) },
+    ]
+  },
 }

@@ -43,9 +43,12 @@ db.exec(`
   );
 `)
 
+// Added after the first release: one-sided LP state for lp-range bots (JSON).
+if (!db.prepare('PRAGMA table_info(bots)').all().some((c) => c.name === 'lp')) db.exec('ALTER TABLE bots ADD COLUMN lp TEXT')
+
 const now = () => new Date().toISOString()
-const JSON_COLS = ['params', 'assets', 'positions', 'cost_basis', 'highs']
-const parseBot = (row) => row && Object.fromEntries(Object.entries(row).map(([k, v]) => [k, JSON_COLS.includes(k) ? JSON.parse(v) : v]))
+const JSON_COLS = ['params', 'assets', 'positions', 'cost_basis', 'highs', 'lp']
+const parseBot = (row) => row && Object.fromEntries(Object.entries(row).map(([k, v]) => [k, JSON_COLS.includes(k) && v != null ? JSON.parse(v) : v]))
 
 // --- users & wallets ---------------------------------------------------------
 
@@ -75,6 +78,11 @@ export function createBot({ userId, name, strategy, params, assets, timeframe, i
     .run(userId, name, strategy, JSON.stringify(params), JSON.stringify(assets), timeframe, intervalSec, startUsdt, startUsdt, startUsdt, startUsdt, now(), now())
   return getBot(Number(lastInsertRowid))
 }
+/** Delete a bot with its trades and decisions. */
+export const deleteBot = (id) => db.prepare('DELETE FROM bots WHERE id = ?').run(id).changes
+/** Forget a user's custodial wallet; the next command creates a new one. */
+export const walletOwner = (address) => db.prepare('SELECT user_id FROM wallets WHERE lower(address) = lower(?)').get(address)?.user_id ?? null
+export const deleteWallet = (userId) => db.prepare('DELETE FROM wallets WHERE user_id = ?').run(userId).changes
 export const getBot = (id) => parseBot(db.prepare('SELECT * FROM bots WHERE id = ?').get(id))
 export const userBots = (userId) => db.prepare('SELECT * FROM bots WHERE user_id = ? ORDER BY id').all(userId).map(parseBot)
 export const runningBots = () => db.prepare("SELECT * FROM bots WHERE status = 'running'").all().map(parseBot)

@@ -14,4 +14,12 @@ export default {
     if (position > 0 && b.percentB >= 0.5) return { side: 'sell', fraction: 1, reason: `back at middle band: ${state}` }
     return { reason: `hold: ${state}` }
   },
+  levels({ ta }) {
+    const b = ta.bbands
+    if (b?.value == null) return []
+    return [
+      { side: 'buy', label: 'Buy below lower band', price: b.lower },
+      { side: 'sell', label: 'Sell at middle band', price: b.value },
+    ]
+  },
 }

@@ -36,6 +36,23 @@ export function createWallet() {
   return { address, encryptedKey: encrypt(key, address) }
 }
 
+/**
+ * Wallet from an existing private key (64 hex characters, 0x optional). Errors
+ * never include the key.
+ */
+export function importWallet(privateKey) {
+  const hex = String(privateKey ?? '').trim().replace(/^0x/i, '')
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) throw Object.assign(new Error('That is not a private key (expected 64 hex characters)'), { status: 400 })
+  const key = `0x${hex.toLowerCase()}`
+  let address
+  try {
+    ;({ address } = privateKeyToAccount(key))
+  } catch {
+    throw Object.assign(new Error('Invalid private key'), { status: 400 })
+  }
+  return { address, encryptedKey: encrypt(key, address) }
+}
+
 /** viem account for signing; keep it short-lived. */
 export const unlock = ({ address, encryptedKey }) => privateKeyToAccount(decrypt(encryptedKey, address))
 

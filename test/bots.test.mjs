@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 process.env.MASTER_KEY = 'a'.repeat(64)
 process.env.DB_FILE = ':memory:'
-const { createWallet, decrypt, unlock } = await import('../src/vault.mjs')
+const { createWallet, decrypt, importWallet, unlock } = await import('../src/vault.mjs')
 const { riskExit } = await import('../src/engine.mjs')
 const smaCross = (await import('../src/strategies/sma-cross.mjs')).default
 const breakout = (await import('../src/strategies/breakout.mjs')).default
@@ -15,6 +15,19 @@ test('vault round-trips a key and binds it to the address', () => {
   assert.equal(unlock(w).address, w.address)
   assert.ok(!w.encryptedKey.includes(w.address.slice(2)))
   assert.throws(() => decrypt(w.encryptedKey, '0x0000000000000000000000000000000000000001'))
+})
+
+test('importWallet accepts a key with or without 0x and never echoes it', () => {
+  const key = 'ab'.repeat(32)
+  const w = importWallet(key)
+  assert.equal(importWallet(`0x${key}`).address, w.address)
+  assert.equal(decrypt(w.encryptedKey, w.address), `0x${key}`)
+  assert.equal(unlock(w).address, w.address)
+  for (const bad of ['0x1234', `${key}00`, 'zz'.repeat(32), '']) {
+    assert.throws(() => importWallet(bad), (err) => !err.message.includes(bad || '\u0000') && err.status === 400)
+  }
+  // secp256k1 rejects zero; the error must not contain the key either.
+  assert.throws(() => importWallet('0'.repeat(64)), (err) => err.message === 'Invalid private key')
 })
 
 test('sma-cross buys in an uptrend and sells in a downtrend', () => {
@@ -31,6 +44,19 @@ test('breakout buys a new high and exits on a new low', () => {
   assert.equal(breakout.decide({ candles: candles([5, 5, 5, 6]), position: 0, params }).side, 'buy')
   assert.equal(breakout.decide({ candles: candles([5, 5, 5, 4]), position: 1, params }).side, 'sell')
   assert.equal(breakout.decide({ candles: candles([5, 5, 5, 5]), position: 0, params }).side, undefined)
+})
+
+test('breakout levels match the prices its decide() trades at', () => {
+  const params = { entry: 3, exit: 2 }
+  const c = candles([4, 6, 5, 7, 5])
+  const [buy, sell] = breakout.levels({ candles: c, params })
+  assert.deepEqual([buy.side, buy.price, sell.side, sell.price], ['buy', 7, 'sell', 5])
+  assert.deepEqual(breakout.levels({ candles: candles([5, 5]), params }), [])
+  // exit longer than entry: the sell low must look back `exit` candles, like decide().
+  const long = { entry: 2, exit: 4 }
+  const [, wide] = breakout.levels({ candles: candles([3, 6, 7, 8, 9]), params: long })
+  assert.equal(wide.price, 3)
+  assert.equal(breakout.decide({ candles: candles([3, 6, 7, 8, 2.5]), position: 1, params: long }).side, 'sell')
 })
 
 test('riskExit applies stop loss, take profit and trailing stop', () => {

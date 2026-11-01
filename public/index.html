@@ -37,11 +37,7 @@
       <form id="new-bot" class="card" hidden>
         <h3>New paper bot</h3>
         <label>Strategy <select name="strategy"></select></label>
-        <fieldset><legend>Assets</legend>
-          <label class="inline"><input type="checkbox" name="assets" value="btc" checked> BTC</label>
-          <label class="inline"><input type="checkbox" name="assets" value="eth" checked> ETH</label>
-          <label class="inline"><input type="checkbox" name="assets" value="hsk"> HSK</label>
-        </fieldset>
+        <fieldset><legend>Assets (up to 5)</legend><div id="asset-picks" class="picks"></div></fieldset>
         <label>Timeframe
           <select name="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
         </label>
@@ -59,11 +55,35 @@
 
     <section id="strategies" hidden>
       <h2>Strategies</h2>
+      <form id="preview" class="card">
+        <h3>Strategy preview</h3>
+        <p class="muted small">Pick a strategy and an asset to see what it watches and where it would have bought and sold.</p>
+        <div class="params">
+          <label>Strategy <select name="strategy"></select></label>
+          <label>Asset <select name="asset"></select></label>
+          <label>Timeframe
+            <select name="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
+          </label>
+          <label>Stop loss % <input name="stopLossPct" type="number" min="0" step="0.5" placeholder="off"></label>
+          <label>Take profit % <input name="takeProfitPct" type="number" min="0" step="0.5" placeholder="off"></label>
+          <label>Trailing stop % <input name="trailingStopPct" type="number" min="0" step="0.5" placeholder="off"></label>
+        </div>
+        <div id="preview-legend" class="legend"></div>
+        <div id="preview-chart" class="chart"></div>
+        <div id="preview-pane" class="chart pane" hidden></div>
+        <div id="preview-stats" class="stats"></div>
+        <p class="muted small" id="preview-note"></p>
+        <div class="row">
+          <button type="button" id="preview-create" class="primary">Create paper bot with these settings</button>
+          <span id="preview-msg" class="small"></span>
+        </div>
+      </form>
       <div id="strategy-list" class="grid"></div>
     </section>
   </main>
 
   <dialog id="detail"><div id="detail-body"></div><form method="dialog"><button class="close">Close</button></form></dialog>
+  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
   <script src="/app.js" type="module"></script>
 </body>
 </html>

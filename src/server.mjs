@@ -24,11 +24,12 @@
 //   POST /api/logout
 //   GET  /api/strategies
 //   GET  /api/leaderboard?mode=paper|live
-//   GET  /api/bots/:id             public bot view; also /trades and /decisions
+//   GET  /api/preview?strategy=&asset=&timeframe=[&param=value]  strategy replay for the chart preview
+//   GET  /api/bots/:id             public bot view; also /trades, /decisions, /levels?asset=
 //   GET  /api/me                   (session) user, wallet, balances
 //   GET  /api/me/bots              (session)
 //   POST /api/me/bots              (session) { strategy, assets, timeframe, params } -> paper bot
-//   POST /api/bots/:id/stop        (session) also /resume
+//   POST /api/bots/:id/stop        (session) also /resume, /delete
 
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -40,7 +41,7 @@ import * as paper from './paper.mjs'
 import { getPrice } from './pricing.mjs'
 import { analyze, enabledPlugins, loadPlugins } from './ta/index.mjs'
 import * as db from './db.mjs'
-import { catalog, createBotFor, ownedBot, setStatus, startEngine, walletBalances } from './engine.mjs'
+import { botLevels, catalog, createBotFor, deleteBot, previewStrategy, ownedBot, setStatus, startEngine, walletBalances } from './engine.mjs'
 import { startTelegram } from './telegram.mjs'
 
 const httpError = (status, message) => Object.assign(new Error(message), { status })
@@ -94,6 +95,7 @@ const publicBot = (b) => ({
   id: b.id, name: b.name, strategy: b.strategy, params: b.params, assets: b.assets, timeframe: b.timeframe, intervalSec: b.interval_sec,
   mode: b.mode, status: b.status, haltedReason: b.halted_reason, startUsdt: b.start_usdt, cashUsdt: b.cash, positions: b.positions,
   equityUsd: b.equity_usd, pnlPct: b.pnl_pct, gasUsd: b.gas_usd, trades: b.trades, createdAt: b.created_at, updatedAt: b.updated_at,
+  lp: b.lp && { feesUsd: b.lp.feesUsd, fills: b.lp.fills, range: b.lp.range && (({ L, lastUsdt, ...r }) => r)(b.lp.range) },
   owner: db.getUser(b.user_id)?.username ?? null,
   wallet: db.getWallet(b.user_id)?.address ?? null,
 })
@@ -137,7 +139,20 @@ const routes = [
   ['/api/me/bots', async (_, __, body, ctx) => publicBot(createBotFor(sessionUser(ctx), body)), 'POST'],
   ['/api/bots/:id', async ({ id }) => publicBot(publicBotById(id))],
   ['/api/bots/:id/trades', async ({ id }) => db.botTrades(publicBotById(id).id, 200)],
+  ['/api/preview', async (_, q) => {
+    botsOnly()
+    const { strategy, asset, timeframe, ...params } = Object.fromEntries(q)
+    return previewStrategy({ strategy, asset, timeframe, params })
+  }],
+  ['/api/bots/:id/levels', async ({ id }, q) => {
+    const bot = publicBotById(id)
+    return botLevels(bot, q.get('asset') ?? bot.assets[0])
+  }],
   ['/api/bots/:id/decisions', async ({ id }) => db.botDecisions(publicBotById(id).id, 100)],
+  ['/api/bots/:id/delete', async ({ id }, __, ___, ctx) => {
+    await deleteBot(ownedBot(sessionUser(ctx), id))
+    return { ok: true }
+  }, 'POST'],
   ['/api/bots/:id/stop', async ({ id }, __, ___, ctx) => publicBot(setStatus(ownedBot(sessionUser(ctx), id), 'stopped')), 'POST'],
   ['/api/bots/:id/resume', async ({ id }, __, ___, ctx) => publicBot(setStatus(ownedBot(sessionUser(ctx), id), 'running')), 'POST'],
   ['/health', async () => ({
