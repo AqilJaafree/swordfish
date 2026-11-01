@@ -2,7 +2,7 @@
 // custodial HashKey wallet and can run paper or live bots.
 
 import { Bot, GrammyError, HttpError } from 'grammy'
-import { config } from './config.mjs'
+import { config, telegramAllowed } from './config.mjs'
 import * as db from './db.mjs'
 import { catalog, closeBot, createBotFor, events, goLive, ownedBot, RISK_DEFAULTS, setStatus, walletBalances, withdraw } from './engine.mjs'
 import { createWallet, exportKey } from './vault.mjs'
@@ -46,6 +46,15 @@ export function startTelegram() {
   if (!config.telegramToken) return null
   const bot = new Bot(config.telegramToken)
   const reply = (ctx, text, extra = {}) => ctx.reply(text, { parse_mode: 'HTML', link_preview_options: { is_disabled: true }, ...extra })
+
+  // Only allowlisted accounts (TELEGRAM_ALLOWED_USERS) can use the bot.
+  bot.use(async (ctx, next) => {
+    if (!ctx.from || !telegramAllowed(ctx.from.id, ctx.from.username)) {
+      if (ctx.chat?.type === 'private') await reply(ctx, 'Swordfish is invite-only for now.')
+      return
+    }
+    return next()
+  })
 
   // Wallet and bot commands only work in a private chat with the bot.
   bot.use(async (ctx, next) => {

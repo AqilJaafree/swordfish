@@ -34,7 +34,7 @@ import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { assets, findAsset } from './assets.mjs'
 import { getCandles, startSampler, TIMEFRAMES } from './candles.mjs'
-import { config } from './config.mjs'
+import { config, telegramAllowed } from './config.mjs'
 import { quoteOrder } from './execution.mjs'
 import * as paper from './paper.mjs'
 import { getPrice } from './pricing.mjs'
@@ -86,7 +86,7 @@ const cookies = (req) => Object.fromEntries((req.headers.cookie ?? '').split(';'
 function sessionUser(ctx) {
   botsOnly()
   const user = ctx.sid && db.useToken(ctx.sid, 'session')
-  if (!user) throw httpError(401, 'Log in with /web in the Telegram bot')
+  if (!user || !telegramAllowed(user.tg_id, user.username)) throw httpError(401, 'Log in with /web in the Telegram bot')
   return user
 }
 
