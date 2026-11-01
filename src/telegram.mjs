@@ -1,11 +1,12 @@
 // Telegram front end (grammY, long polling). Each Telegram user gets a
 // custodial HashKey wallet and can run paper or live bots.
 
-import { Bot, GrammyError, HttpError } from 'grammy'
+import { Bot, GrammyError, HttpError, InlineKeyboard } from 'grammy'
 import { config, telegramAllowed } from './config.mjs'
 import * as db from './db.mjs'
 import { catalog, closeBot, createBotFor, deleteBot, deleteWallet, events, goLive, importWallet, ownedBot, RISK_DEFAULTS, setStatus, walletBalances, withdraw, withdrawAll } from './engine.mjs'
 import { createWallet, exportKey } from './vault.mjs'
+import { findAsset } from './assets.mjs'
 
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
 const usd = (n) => (n == null ? '-' : `$${Number(n).toFixed(2)}`)
@@ -14,6 +15,7 @@ const explorer = (path) => `https://hsk.blockscout.com/${path}`
 
 const HELP = `<b>Swordfish</b>: strategy bots on HashKey Chain.
 
+/start: menu with buttons
 /wallet: your bot wallet and balances
 /strategies: available strategies
 /newbot &lt;strategy&gt; &lt;assets&gt; [timeframe] [param=value ...]
@@ -46,10 +48,131 @@ function botLine(b) {
   return `#${b.id} <b>${esc(b.name)}</b>\n   ${b.strategy} · ${b.assets.join(',')} · ${b.timeframe} · ${b.mode.toUpperCase()} · ${status}\n   equity ${usd(b.equity_usd)} (${pct(b.pnl_pct)}) · ${b.trades} trades`
 }
 
-export function startTelegram() {
+// --- screens (shared by commands and buttons) -----------------------------------
+// Each returns { text, kb }. Callback data: m:<menu>, b:<id>[:action], n:<strategy>[:assets[:tf]], lb:<mode>, w:<action>.
+
+const balancesLine = (bal) => Object.entries(bal).map(([k, v]) => `${k.toUpperCase()} ${v}`).join(' · ')
+const back = (kb, to = 'm:menu', label = '⬅ Menu') => kb.row().text(label, to)
+
+function menuScreen(user) {
+  const w = db.getWallet(user.id)
+  return {
+    text: `<b>Swordfish</b>: strategy bots on HashKey Chain.\nWallet <code>${w.address}</code>\n\nPick an option, or send /help for typed commands.`,
+    kb: new InlineKeyboard()
+      .text('💼 Wallet', 'm:wallet').text('🤖 My bots', 'm:bots').row()
+      .text('➕ New bot', 'm:new').text('📚 Strategies', 'm:strategies').row()
+      .text('🏆 Leaderboard', 'lb:paper').text('🌐 Dashboard', 'm:web').row()
+      .text('❓ Help', 'm:help'),
+  }
+}
+
+async function walletScreen(user) {
+  const w = db.getWallet(user.id)
+  const bal = await walletBalances(w.address)
+  return {
+    text:
+      `<b>Wallet</b> <code>${w.address}</code>\n${Object.entries(bal).map(([k, v]) => `${k.toUpperCase()}: ${v}`).join('\n')}` +
+      `\n\nDeposit USDT (and ≥${config.bots.minGasHsk} HSK for gas) on HashKey Chain to trade live.\n<a href="${explorer(`address/${w.address}`)}">View on Blockscout</a>`,
+    kb: back(new InlineKeyboard().text('🔄 Refresh', 'm:wallet').text('📤 Withdraw', 'w:withdraw').row().text('🔑 Export key', 'w:export').text('🗑 Delete wallet', 'w:delete')),
+  }
+}
+
+function botsScreen(user) {
+  const bots = db.userBots(user.id)
+  const kb = new InlineKeyboard()
+  for (const b of bots) kb.text(`#${b.id} ${b.strategy} · ${b.mode === 'live' ? 'LIVE' : 'paper'} · ${pct(b.pnl_pct)}${b.status === 'running' ? '' : ` · ${b.status}`}`, `b:${b.id}`).row()
+  kb.text('➕ New bot', 'm:new')
+  return { text: bots.length ? `<b>Your bots</b>\n\n${bots.map(botLine).join('\n\n')}` : 'No bots yet.', kb: back(kb) }
+}
+
+function botScreen(b) {
+  const trades = db.botTrades(b.id, 5)
+  const last = db.botDecisions(b.id, 2)
+  const positions = Object.entries(b.positions).map(([a, q]) => `${a}: ${q}`).join(', ') || 'none'
+  const lp = b.lp?.range ? `\n   LP ${b.lp.range.side === 'usdt' ? 'buy' : 'sell'} range ${b.lp.range.lower.toPrecision(6)}–${b.lp.range.upper.toPrecision(6)} · fees ${usd(b.lp.feesUsd)}` : ''
+  const kb = new InlineKeyboard()
+    .text(b.status === 'running' ? '⏸ Stop' : '▶ Resume', `b:${b.id}:${b.status === 'running' ? 'stop' : 'resume'}`).text('🔄 Refresh', `b:${b.id}`).row()
+    .text('💰 Close (sell all)', `b:${b.id}:close`).text('🗑 Delete', `b:${b.id}:del`)
+  if (b.mode === 'paper') kb.row().text('🚀 Go live', `b:${b.id}:live`)
+  return {
+    text:
+      `${botLine(b)}\n   cash ${usd(b.cash)} · positions ${esc(positions)}${lp}\n   params ${esc(JSON.stringify(b.params))}\n\n<b>Recent trades</b>\n` +
+      (trades.map((t) => `${t.time.slice(5, 16)} ${t.side} ${t.asset} ${usd(t.usdt)} @ ${t.exec_price.toPrecision(6)}${t.tx_hash ? ` <a href="${explorer(`tx/${t.tx_hash}`)}">tx</a>` : ''}`).join('\n') || 'none') +
+      `\n\n<b>Last decisions</b>\n` +
+      (last.map((d) => `${d.asset}: ${esc(d.error ?? d.reason ?? '').slice(0, 300)}`).join('\n') || 'none'),
+    kb: back(kb, 'm:bots', '⬅ My bots'),
+  }
+}
+
+const confirmKb = (yes, no, label = '✅ Yes') => new InlineKeyboard().text(label, yes).text('✖ Cancel', no)
+
+function liveScreen(b, budget) {
+  const perTrade = usd(Math.min(b.params.tradeUsd ?? RISK_DEFAULTS.tradeUsd, config.bots.liveMaxTradeUsd))
+  if (!budget) {
+    const amounts = [1, 5, 10, 25, 50, 100, 250, 500].filter((a) => a <= config.bots.liveMaxBudgetUsd)
+    const kb = new InlineKeyboard()
+    for (const [i, a] of amounts.entries()) {
+      kb.text(`${a} USDT`, `b:${b.id}:live:${a}`)
+      if (i % 4 === 3) kb.row()
+    }
+    return { text: `🚀 Pick a USDT budget for bot #${b.id} (max ${config.bots.liveMaxBudgetUsd}). The wallet needs that much USDT and ≥${config.bots.minGasHsk} HSK for gas.\nOther amounts: <code>/live ${b.id} 3</code>`, kb: back(kb, `b:${b.id}`, '✖ Cancel') }
+  }
+  return {
+    text: `⚠️ Bot #${b.id} will trade <b>real funds</b> from your wallet: ${budget} USDT budget, up to ${perTrade} per trade, max ${config.bots.liveMaxImpactPct}% price impact, halts after a ${config.bots.liveDailyLossPct}% daily loss. Its paper history is reset.`,
+    kb: confirmKb(`b:${b.id}:liveok:${budget}`, `b:${b.id}`, '🚀 Go live'),
+  }
+}
+
+function leaderboardScreen(mode) {
+  const rows = db.leaderboard(mode, 10)
+  return {
+    text:
+      `<b>Leaderboard (${mode})</b>, P&amp;L after costs\n\n` +
+      (rows.map((r, i) => `${i + 1}. ${pct(r.pnl_pct)} · #${r.id} ${esc(r.name)} by @${esc(r.username)} · ${r.strategy} · ${r.trades} trades`).join('\n') || 'No bots yet.'),
+    kb: back(new InlineKeyboard().text(mode === 'paper' ? '• Paper' : 'Paper', 'lb:paper').text(mode === 'live' ? '• Live' : 'Live', 'lb:live')),
+  }
+}
+
+function strategiesScreen() {
+  const lines = catalog().map((s) => `<b>${s.name}</b>${s.llm ? ' (Claude Haiku)' : ''}: ${esc(s.description)}${Object.keys(s.params).length ? `\n   params: ${esc(JSON.stringify(s.params))}` : ''}`)
+  return { text: `${lines.join('\n\n')}\n\n<b>Exit rules for any bot</b> (0 = off): ${esc(JSON.stringify(RISK_DEFAULTS))}`, kb: back(new InlineKeyboard().text('➕ New bot', 'm:new')) }
+}
+
+// New-bot wizard: strategy -> assets -> timeframe -> paper bot.
+function newBotScreen(strategy, assets) {
+  const kb = new InlineKeyboard()
+  if (!strategy) {
+    for (const [i, s] of catalog().entries()) {
+      kb.text(s.name, `n:${s.name}`)
+      if (i % 2) kb.row()
+    }
+    return { text: '➕ <b>New paper bot</b>\nStep 1/3: pick a strategy. (Details under 📚 Strategies.)', kb: back(kb) }
+  }
+  const s = catalog().find((x) => x.name === strategy)
+  if (!s) throw Object.assign(new Error(`Unknown strategy ${strategy}`), { status: 400 })
+  if (!assets) {
+    kb.text('BTC', `n:${strategy}:wbtc`).text('ETH', `n:${strategy}:weth`)
+    if (!s.lp) kb.text('BTC + ETH', `n:${strategy}:wbtc,weth`).text('HSK', `n:${strategy}:hsk`)
+    return { text: `➕ <b>${strategy}</b>\nStep 2/3: pick what it trades.${s.lp ? ' (Liquidity bots run on one coin.)' : ''}`, kb: back(kb, 'm:new', '⬅ Back') }
+  }
+  for (const tf of ['15m', '1h', '4h', '1d']) kb.text(tf, `n:${strategy}:${assets}:${tf}`)
+  const names = assets.split(',').map((a) => findAsset(a)?.symbol ?? a).join(' + ')
+  return { text: `➕ <b>${strategy}</b> on ${esc(names)}\nStep 3/3: pick the candle timeframe it reads (1h is a good default).`, kb: back(kb, `n:${strategy}`, '⬅ Back') }
+}
+
+/** Build the bot and start long polling. `start: false` (tests) only builds it. */
+export function startTelegram({ start = true, botInfo } = {}) {
   if (!config.telegramToken) return null
-  const bot = new Bot(config.telegramToken)
+  const bot = new Bot(config.telegramToken, botInfo ? { botInfo } : undefined)
   const reply = (ctx, text, extra = {}) => ctx.reply(text, { parse_mode: 'HTML', link_preview_options: { is_disabled: true }, ...extra })
+  const send = (ctx, { text, kb }) => reply(ctx, text, { reply_markup: kb })
+  // From a button: replace the message in place; from a command: send a new one.
+  const show = async (ctx, screen) => {
+    if (!ctx.callbackQuery) return send(ctx, screen)
+    await ctx.editMessageText(screen.text, { parse_mode: 'HTML', link_preview_options: { is_disabled: true }, reply_markup: screen.kb }).catch((err) => {
+      if (!/not modified/.test(err.description ?? '')) throw err
+    })
+  }
 
   // Only allowlisted accounts (TELEGRAM_ALLOWED_USERS) can use the bot.
   bot.use(async (ctx, next) => {
@@ -67,58 +190,33 @@ export function startTelegram() {
       if (cmd === '/importwallet') await ctx.deleteMessage().catch(() => {})
       return reply(ctx, 'Message me privately for wallet and bot commands.')
     }
+    const data = ctx.callbackQuery?.data
+    if (data && ctx.chat?.type !== 'private' && !/^(lb:|m:strategies)/.test(data)) {
+      return ctx.answerCallbackQuery({ text: 'Message me privately for wallet and bot controls.', show_alert: true })
+    }
     return next()
   })
 
-  bot.command(['start', 'help'], async (ctx) => {
-    const user = userOf(ctx)
-    const w = db.getWallet(user.id)
-    await reply(ctx, `${HELP}\n\nYour wallet: <code>${w.address}</code>`)
-  })
-
-  bot.command('wallet', async (ctx) => {
-    const w = db.getWallet(userOf(ctx).id)
-    const bal = await walletBalances(w.address)
-    await reply(
-      ctx,
-      `<b>Wallet</b> <code>${w.address}</code>\n` +
-        Object.entries(bal).map(([k, v]) => `${k.toUpperCase()}: ${v}`).join('\n') +
-        `\n\nDeposit USDT (and ≥${config.bots.minGasHsk} HSK for gas) on HashKey Chain to trade live.\n<a href="${explorer(`address/${w.address}`)}">View on Blockscout</a>`,
-    )
-  })
-
-  bot.command('strategies', async (ctx) => {
-    const lines = catalog().map((s) => `<b>${s.name}</b>${s.llm ? ' (Claude Haiku)' : ''}: ${esc(s.description)}${Object.keys(s.params).length ? `\n   params: ${esc(JSON.stringify(s.params))}` : ''}`)
-    await reply(ctx, `${lines.join('\n\n')}\n\n<b>Exit rules for any bot</b> (0 = off): ${esc(JSON.stringify(RISK_DEFAULTS))}`)
-  })
+  bot.command(['start', 'menu'], (ctx) => send(ctx, menuScreen(userOf(ctx))))
+  bot.command('help', (ctx) => reply(ctx, HELP, { reply_markup: new InlineKeyboard().text('📋 Menu', 'm:menu') }))
+  bot.command('wallet', async (ctx) => send(ctx, await walletScreen(userOf(ctx))))
+  bot.command('strategies', (ctx) => send(ctx, strategiesScreen()))
 
   bot.command('newbot', async (ctx) => {
     const user = userOf(ctx)
     const [strategy, assets, ...rest] = args(ctx)
-    if (!strategy || !assets) return reply(ctx, 'Usage: <code>/newbot sma-cross btc,eth 1h stopLossPct=5</code>')
+    if (!strategy) return send(ctx, newBotScreen())
+    if (!assets) return send(ctx, newBotScreen(strategy))
     const timeframe = rest[0] && !rest[0].includes('=') ? rest.shift() : '1h'
     const params = Object.fromEntries(rest.map((kv) => kv.split('=')))
     const b = createBotFor(user, { strategy, assets, timeframe, params })
-    await reply(ctx, `Created paper bot:\n${botLine(b)}\n\nIt checks every ${b.interval_sec / 60} min. Go live with <code>/live ${b.id} 50</code>.`)
+    await send(ctx, botScreen(b))
   })
 
-  bot.command('bots', async (ctx) => {
-    const bots = db.userBots(userOf(ctx).id)
-    await reply(ctx, bots.length ? bots.map(botLine).join('\n\n') : 'No bots yet. Try <code>/newbot sma-cross btc,eth 1h</code>')
-  })
-
-  bot.command('bot', async (ctx) => {
-    const b = ownedBot(userOf(ctx), args(ctx)[0])
-    const trades = db.botTrades(b.id, 5)
-    const last = db.botDecisions(b.id, 2)
-    const positions = Object.entries(b.positions).map(([a, q]) => `${a}: ${q}`).join(', ') || 'none'
-    await reply(
-      ctx,
-      `${botLine(b)}\n   cash ${usd(b.cash)} · positions ${esc(positions)}\n   params ${esc(JSON.stringify(b.params))}\n\n<b>Recent trades</b>\n` +
-        (trades.map((t) => `${t.time.slice(5, 16)} ${t.side} ${t.asset} ${usd(t.usdt)} @ ${t.exec_price.toPrecision(6)}${t.tx_hash ? ` <a href="${explorer(`tx/${t.tx_hash}`)}">tx</a>` : ''}`).join('\n') || 'none') +
-        `\n\n<b>Last decisions</b>\n` +
-        (last.map((d) => `${d.asset}: ${esc(d.error ?? d.reason ?? '').slice(0, 300)}`).join('\n') || 'none'),
-    )
+  bot.command('bots', (ctx) => send(ctx, botsScreen(userOf(ctx))))
+  bot.command('bot', (ctx) => {
+    const [id] = args(ctx)
+    return send(ctx, id ? botScreen(ownedBot(userOf(ctx), id)) : botsScreen(userOf(ctx)))
   })
 
   for (const [cmd, status] of [['stop', 'stopped'], ['resume', 'running']]) {
@@ -128,43 +226,27 @@ export function startTelegram() {
     })
   }
 
+  const closeSummary = (results) =>
+    results.map((r) => (r.error ? `${r.asset}: failed, ${esc(r.error)}` : `${r.side === 'buy' ? 'bought' : 'sold'} ${r.asset} for ${usd(r.usdt)}`)).join('\n') || 'No positions. Bot stopped.'
   bot.command('close', async (ctx) => {
     const b = ownedBot(userOf(ctx), args(ctx)[0])
     await reply(ctx, `Closing bot #${b.id}: selling all positions...`)
-    const results = await closeBot(b)
-    await reply(ctx, results.map((r) => (r.error ? `${r.asset}: failed, ${esc(r.error)}` : `${r.side === 'buy' ? 'bought' : 'sold'} ${r.asset} for ${usd(r.usdt)}`)).join('\n') || 'No positions. Bot stopped.')
+    await reply(ctx, closeSummary(await closeBot(b)))
   })
 
   bot.command('live', async (ctx) => {
     const user = userOf(ctx)
     const [id, budget, confirm] = args(ctx)
     const b = ownedBot(user, id)
-    if (!budget) return reply(ctx, `Usage: <code>/live ${b.id} 50</code> (USDT budget, max ${config.bots.liveMaxBudgetUsd})`)
-    if (confirm !== 'confirm') {
-      return reply(
-        ctx,
-        `⚠️ Bot #${b.id} will trade <b>real funds</b> from your wallet: ${budget} USDT budget, up to ${usd(Math.min(b.params.tradeUsd ?? RISK_DEFAULTS.tradeUsd, config.bots.liveMaxTradeUsd))} per trade, max ${config.bots.liveMaxImpactPct}% price impact, halts after a ${config.bots.liveDailyLossPct}% daily loss. Its paper history is reset.\n\nSend <code>/live ${b.id} ${budget} confirm</code> to proceed.`,
-      )
-    }
+    if (!budget || confirm !== 'confirm') return send(ctx, liveScreen(b, budget))
     const live = await goLive(user, b, budget)
     await reply(ctx, `Bot #${live.id} is LIVE with ${usd(live.start_usdt)}.\n${botLine(live)}`)
   })
 
-  bot.command('leaderboard', async (ctx) => {
-    const mode = args(ctx)[0] === 'live' ? 'live' : 'paper'
-    const rows = db.leaderboard(mode, 10)
-    await reply(
-      ctx,
-      `<b>Leaderboard (${mode})</b>, P&amp;L after costs\n\n` +
-        (rows.map((r, i) => `${i + 1}. ${pct(r.pnl_pct)} · #${r.id} ${esc(r.name)} by @${esc(r.username)} · ${r.strategy} · ${r.trades} trades`).join('\n') || 'No bots yet.') +
-        `\n\n${mode === 'paper' ? '/leaderboard live' : '/leaderboard'} · <a href="${config.webUrl}">dashboard</a>`,
-    )
-  })
+  bot.command('leaderboard', (ctx) => send(ctx, leaderboardScreen(args(ctx)[0] === 'live' ? 'live' : 'paper')))
 
-  bot.command('web', async (ctx) => {
-    const token = db.issueToken(userOf(ctx).id, 'login', 10 * 60)
-    await reply(ctx, `One-time login link (10 min):\n${config.webUrl}/auth/login?token=${token}`)
-  })
+  const webLink = (ctx) => reply(ctx, `One-time login link (10 min):\n${config.webUrl}/auth/login?token=${db.issueToken(userOf(ctx).id, 'login', 10 * 60)}`)
+  bot.command('web', webLink)
 
   const sent = (r) => (r.error ? `${r.asset.toUpperCase()}: ${esc(r.error)}` : `${r.amount} ${r.asset.toUpperCase()} ${r.status}: <a href="${explorer(`tx/${r.hash}`)}">${r.hash.slice(0, 14)}…</a>`)
   bot.command('withdraw', async (ctx) => {
@@ -186,13 +268,15 @@ export function startTelegram() {
     await reply(ctx, sent(await withdraw(user, asset, amount, to)))
   })
 
+  const deleteBotScreen = (b) => ({
+    text: `Delete bot #${b.id} <b>${esc(b.name)}</b> (${b.mode.toUpperCase()}, ${b.trades} trades) and its history? It leaves the leaderboard.`,
+    kb: confirmKb(`b:${b.id}:delok`, `b:${b.id}`, '🗑 Delete'),
+  })
   bot.command('deletebot', async (ctx) => {
     const [id, confirm] = args(ctx)
     if (!id) return reply(ctx, 'Usage: <code>/deletebot 7</code>')
     const b = ownedBot(userOf(ctx), id)
-    if (confirm !== 'confirm') {
-      return reply(ctx, `Delete bot #${b.id} <b>${esc(b.name)}</b> (${b.mode.toUpperCase()}, ${b.trades} trades) and its history? It leaves the leaderboard.\nReply <code>/deletebot ${b.id} confirm</code>`)
-    }
+    if (confirm !== 'confirm') return send(ctx, deleteBotScreen(b))
     await deleteBot(b)
     await reply(ctx, `Bot #${b.id} deleted.`)
   })
@@ -220,36 +304,117 @@ export function startTelegram() {
     }
   })
 
+  const deleteWalletScreen = async (w) => ({
+    text:
+      `⚠️ This permanently deletes the key for <code>${w.address}</code>. Swordfish cannot recover it.\nBalances: ${balancesLine(await walletBalances(w.address))}\n\n` +
+      `First move funds out with <code>/withdraw all 0xYourAddress</code> (or save the key with 🔑 Export key) and delete any live bots. Your next command then creates a fresh wallet.`,
+    kb: confirmKb('w:deleteok', 'm:wallet', '🗑 Delete wallet'),
+  })
+  const deleteWalletNow = async (user, abandonFunds) => {
+    try {
+      const r = await deleteWallet(user, { abandonFunds })
+      return `Wallet <code>${r.address}</code> deleted${r.abandoned.length ? `; left behind ${r.abandoned.map(([k, v]) => `${v} ${k.toUpperCase()}`).join(', ')}` : ''}. Send /start for a new one.`
+    } catch (err) {
+      if (!err.balances) throw err
+      return `${esc(err.message)}.\nWithdraw first with <code>/withdraw all 0xYourAddress</code>. To delete anyway and leave the funds (reachable only with a key saved via /export), send <code>/deletewallet confirm abandon</code>.`
+    }
+  }
   bot.command('deletewallet', async (ctx) => {
     const user = userOf(ctx)
     const w = db.getWallet(user.id)
     const [confirm, abandon] = args(ctx)
-    if (confirm !== 'confirm') {
-      const bal = await walletBalances(w.address)
-      return reply(
-        ctx,
-        `⚠️ This permanently deletes the key for <code>${w.address}</code>. Swordfish cannot recover it.\n` +
-          `Balances: ${Object.entries(bal).map(([k, v]) => `${v} ${k.toUpperCase()}`).join(' · ')}\n\n` +
-          `1. Move funds out: <code>/withdraw all 0xYourAddress</code> (or save the key with /export)\n2. Delete live bots: /deletebot\n3. Send <code>/deletewallet confirm</code>\n\nYour next command creates a fresh wallet.`,
-      )
-    }
-    try {
-      const r = await deleteWallet(user, { abandonFunds: abandon === 'abandon' })
-      await reply(ctx, `Wallet <code>${r.address}</code> deleted${r.abandoned.length ? `; left behind ${r.abandoned.map(([k, v]) => `${v} ${k.toUpperCase()}`).join(', ')}` : ''}. Send /wallet for a new one.`)
-    } catch (err) {
-      if (!err.balances) throw err
-      await reply(ctx, `${esc(err.message)}.\nWithdraw first with <code>/withdraw all 0xYourAddress</code>. To delete anyway and leave the funds (reachable only with a key saved via /export), send <code>/deletewallet confirm abandon</code>.`)
-    }
+    if (confirm !== 'confirm') return send(ctx, await deleteWalletScreen(w))
+    await reply(ctx, await deleteWalletNow(user, abandon === 'abandon'))
   })
 
-  bot.command('export', async (ctx) => {
-    const w = db.getWallet(userOf(ctx).id)
-    if (args(ctx)[0] !== 'confirm') {
-      return reply(ctx, '⚠️ Anyone with the private key controls your funds. It will be shown once and deleted after 60 seconds.\nSend <code>/export confirm</code>.')
-    }
+  const exportScreen = {
+    text: '⚠️ Anyone with the private key controls your funds. It is shown once and deleted after 60 seconds.',
+    kb: confirmKb('w:exportok', 'm:wallet', '🔑 Show key'),
+  }
+  const showKey = async (ctx, w) => {
     const msg = await reply(ctx, `<tg-spoiler><code>${exportKey(w)}</code></tg-spoiler>\nSave it offline now; this message deletes in 60s.`)
     setTimeout(() => ctx.api.deleteMessage(ctx.chat.id, msg.message_id).catch(() => {}), 60_000)
+  }
+  bot.command('export', async (ctx) => {
+    const w = db.getWallet(userOf(ctx).id)
+    if (args(ctx)[0] !== 'confirm') return send(ctx, exportScreen)
+    await showKey(ctx, w)
     setTimeout(() => ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id).catch(() => {}), 60_000)
+  })
+
+  // --- buttons -----------------------------------------------------------------------
+
+  bot.on('callback_query:data', async (ctx) => {
+    const [kind, a, b2, c] = ctx.callbackQuery.data.split(':')
+    try {
+      const user = userOf(ctx)
+      if (kind === 'm') {
+        if (a === 'menu') return void (await show(ctx, menuScreen(user)))
+        if (a === 'wallet') return void (await show(ctx, await walletScreen(user)))
+        if (a === 'bots') return void (await show(ctx, botsScreen(user)))
+        if (a === 'new') return void (await show(ctx, newBotScreen()))
+        if (a === 'strategies') return void (await show(ctx, strategiesScreen()))
+        if (a === 'help') return void (await reply(ctx, HELP))
+        if (a === 'web') return void (await webLink(ctx))
+      }
+      if (kind === 'lb') return void (await show(ctx, leaderboardScreen(a === 'live' ? 'live' : 'paper')))
+      if (kind === 'n') {
+        if (!c) return void (await show(ctx, newBotScreen(a, b2)))
+        const created = createBotFor(user, { strategy: a, assets: b2, timeframe: c })
+        await ctx.answerCallbackQuery({ text: `Created paper bot #${created.id}` })
+        return void (await show(ctx, botScreen(created)))
+      }
+      if (kind === 'w') {
+        const w = db.getWallet(user.id)
+        if (a === 'withdraw') {
+          return void (await reply(ctx, 'Send funds to your own wallet (a destination address is needed, so this one is typed):\n<code>/withdraw usdt max 0xYourAddress</code>\n<code>/withdraw all 0xYourAddress</code>'))
+        }
+        if (a === 'export') return void (await show(ctx, exportScreen))
+        if (a === 'exportok') {
+          await show(ctx, await walletScreen(user))
+          return void (await showKey(ctx, w))
+        }
+        if (a === 'delete') return void (await show(ctx, await deleteWalletScreen(w)))
+        if (a === 'deleteok') return void (await show(ctx, { text: await deleteWalletNow(user, false), kb: new InlineKeyboard().text('📋 Menu', 'm:menu') }))
+      }
+      if (kind === 'b') {
+        let bot_ = ownedBot(user, a)
+        const action = b2
+        if (!action) return void (await show(ctx, botScreen(bot_)))
+        if (action === 'stop' || action === 'resume') {
+          bot_ = setStatus(bot_, action === 'stop' ? 'stopped' : 'running')
+          await ctx.answerCallbackQuery({ text: `Bot #${bot_.id} ${bot_.status}` })
+          return void (await show(ctx, botScreen(bot_)))
+        }
+        if (action === 'close') {
+          return void (await show(ctx, { text: `Close bot #${bot_.id}: withdraw any liquidity, sell every position and stop?`, kb: confirmKb(`b:${bot_.id}:closeok`, `b:${bot_.id}`, '💰 Close') }))
+        }
+        if (action === 'closeok') {
+          await ctx.answerCallbackQuery({ text: 'Closing…' })
+          const summary = closeSummary(await closeBot(bot_))
+          await show(ctx, botScreen(db.getBot(bot_.id)))
+          return void (await reply(ctx, `Bot #${bot_.id} closed.\n${summary}`))
+        }
+        if (action === 'del') return void (await show(ctx, deleteBotScreen(bot_)))
+        if (action === 'delok') {
+          await deleteBot(bot_)
+          await ctx.answerCallbackQuery({ text: `Bot #${bot_.id} deleted` })
+          return void (await show(ctx, botsScreen(user)))
+        }
+        if (action === 'live') return void (await show(ctx, liveScreen(bot_, c)))
+        if (action === 'liveok') {
+          await ctx.answerCallbackQuery({ text: 'Checking wallet…' })
+          return void (await show(ctx, botScreen(await goLive(user, bot_, c))))
+        }
+      }
+      await ctx.answerCallbackQuery({ text: 'Unknown button' })
+    } catch (err) {
+      // Expected errors (validation, limits) show as an alert on the button.
+      if (!err.status) console.error(`telegram button ${ctx.callbackQuery.data}: ${err.stack ?? err}`)
+      return void (await ctx.answerCallbackQuery({ text: String(err.message).slice(0, 190), show_alert: true }).catch(() => reply(ctx, `⚠️ ${esc(err.message)}`)))
+    } finally {
+      await ctx.answerCallbackQuery().catch(() => {})
+    }
   })
 
   bot.catch(async ({ ctx, error }) => {
@@ -261,7 +426,8 @@ export function startTelegram() {
   // Trade and halt notifications to the bot's owner.
   const notify = (b, text) => {
     const user = db.getUser(b.user_id)
-    if (user) bot.api.sendMessage(user.tg_id, text, { parse_mode: 'HTML', link_preview_options: { is_disabled: true } }).catch(() => {})
+    const reply_markup = new InlineKeyboard().text(`View bot #${b.id}`, `b:${b.id}`)
+    if (user) bot.api.sendMessage(user.tg_id, text, { parse_mode: 'HTML', link_preview_options: { is_disabled: true }, reply_markup }).catch(() => {})
   }
   events.on('trade', ({ bot: b, trade: t }) =>
     notify(
@@ -274,7 +440,9 @@ export function startTelegram() {
   )
   events.on('halt', ({ bot: b, reason }) => notify(b, `⛔ Bot #${b.id} halted: ${esc(reason)}. Positions are kept; /close ${b.id} to sell or /resume ${b.id}.`))
 
+  if (!start) return bot
   bot.api.setMyCommands([
+    { command: 'start', description: 'Menu' },
     { command: 'wallet', description: 'Wallet address and balances' },
     { command: 'strategies', description: 'Available strategies' },
     { command: 'newbot', description: 'Create a paper bot' },
