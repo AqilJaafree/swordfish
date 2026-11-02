@@ -99,34 +99,161 @@ sectionMotion = createSectionMotion()
 setMotion(paused)
 selectStep(0)
 
+// Signal panel: each tab renders an illustrative chart from a seeded series with
+// real indicator maths (SMA, RSI, MACD), so markers land where the signal fires.
 const signals = {
-  sma: {
-    kicker: 'Moving average crossover', code: 'SMA / 01', title: ['A clearer view', 'of momentum.'], description: 'Watch the signal. Test the thesis.',
-    price: 'M0 270C55 276 90 275 132 255S210 212 260 186 365 132 440 90 540 45 600 9',
-    average: 'M0 248C80 258 120 276 180 246S300 179 390 145 510 84 600 55',
+  sma: { kicker: 'Moving average crossover', code: 'SMA / 01', title: ['A clearer view', 'of momentum.'], description: 'Watch the signal. Test the thesis.' },
+  rsi: { kicker: 'Relative strength index', code: 'RSI / 02', title: ['A perspective', 'on the extremes.'], description: 'Look for stretched momentum.' },
+  macd: { kicker: 'Moving average convergence', code: 'MACD / 03', title: ['Follow a shift', 'in direction.'], description: 'See momentum take a new shape.' },
+}
+const SG = { w: 600, left: 10, right: 534, axis: 594 }
+function seeded(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647 }
+function candles(n, shape, seed, vol) {
+  const rnd = seeded(seed), out = []
+  let close = shape(0)
+  for (let i = 0; i < n; i++) {
+    const open = close
+    close = shape(i / (n - 1)) + (rnd() - 0.5) * vol
+    out.push({ open, close, high: Math.max(open, close) + rnd() * vol * 0.6, low: Math.min(open, close) - rnd() * vol * 0.6, volume: 0.35 + rnd() * 0.65 })
+  }
+  return out
+}
+const smaOf = (xs, p) => xs.map((_, i) => (i < p - 1 ? null : xs.slice(i - p + 1, i + 1).reduce((a, b) => a + b, 0) / p))
+function emaOf(xs, p) { const k = 2 / (p + 1); let e = xs[0]; return xs.map((x) => (e = x * k + e * (1 - k))) }
+function rsiOf(xs, p = 14) {
+  let gain = 0, loss = 0
+  return xs.map((x, i) => {
+    if (i === 0) return null
+    const d = x - xs[i - 1]
+    gain = (gain * (p - 1) + Math.max(d, 0)) / p
+    loss = (loss * (p - 1) + Math.max(-d, 0)) / p
+    return i < p ? null : 100 - 100 / (1 + gain / (loss || 1e-9))
+  })
+}
+const fx = (n) => Math.round(n * 10) / 10
+function line(values, x, y) {
+  let d = ''
+  values.forEach((v, i) => { if (v != null) d += `${d ? 'L' : 'M'}${fx(x(i))} ${y(v)}` })
+  return d
+}
+function crossings(a, b, from = 0) {
+  const out = []
+  for (let i = Math.max(1, from); i < a.length; i++) {
+    if ([a[i], b[i], a[i - 1], b[i - 1]].includes(null)) continue
+    if (a[i - 1] <= b[i - 1] && a[i] > b[i]) out.push({ i, up: true })
+    if (a[i - 1] >= b[i - 1] && a[i] < b[i]) out.push({ i, up: false })
+  }
+  return out
+}
+const tag = (x, y, text, cls = '') => {
+  const w = text.length * 6.6 + 16, tx = Math.min(Math.max(x - w / 2, SG.left), SG.right - w)
+  return `<g class="sg-tag ${cls}" transform="translate(${fx(tx)} ${fx(y)})"><rect width="${fx(w)}" height="19" rx="5"/><text x="8" y="13">${text}</text></g>`
+}
+const marker = (x, y, cls, delay, label, labelY) => `<g class="sg-mk" style="--d:${delay}s"><circle class="sg-halo ${cls}" cx="${fx(x)}" cy="${fx(y)}" r="9"/><circle class="sg-dot ${cls}" cx="${fx(x)}" cy="${fx(y)}" r="4.5"/>${label ? tag(x, labelY, label, cls) : ''}</g>`
+function grid(top, bottom, rows, y, fmt, avoid = -99) {
+  let g = ''
+  for (let r = 0; r <= rows; r++) {
+    const yy = fx(top + ((bottom - top) * r) / rows)
+    g += `<path class="sg-grid" d="M${SG.left} ${yy}H${SG.right}"/>`
+    if (fmt && Math.abs(yy - avoid) > 14) g += `<text class="sg-ax" x="${SG.axis}" y="${fx(yy + 4)}" text-anchor="end">${fmt(yy)}</text>`
+  }
+  return g
+}
+function lastTag(y, value) {
+  return `<g class="sg-last"><path class="sg-lastline" d="M${SG.left} ${y}H${SG.right}"/><rect x="${SG.right + 6}" y="${fx(y - 10)}" width="56" height="20" rx="5"/><text x="${SG.right + 34}" y="${fx(y + 4)}" text-anchor="middle">${value}</text></g>`
+}
+const times = (bottom) => ['09:00', '12:00', '15:00', '18:00', '21:00'].map((t, i) => `<text class="sg-ax" x="${fx(SG.left + ((SG.right - SG.left) * i) / 4)}" y="${bottom}" text-anchor="${i === 0 ? 'start' : i === 4 ? 'end' : 'middle'}">${t}</text>`).join('')
+function invertible(values, top, bottom) { const v = values.filter((x) => x != null), lo = Math.min(...v), hi = Math.max(...v), span = hi - lo, pad = span * 0.06; const y = (x) => fx(bottom - ((x - lo + pad) / (span + pad * 2)) * (bottom - top)); y.inv = (yy) => lo - pad + ((bottom - yy) / (bottom - top)) * (span + pad * 2); return y }
+
+const charts = {
+  sma() {
+    const warm = 20, n = 46
+    const all = candles(n + warm, (t) => 2240 + 34 * Math.sin(t * 5.2 + 0.7) * (1 - t) - 36 * t + 160 * Math.max(0, t - 0.62) ** 1.4, 7, 14)
+    const closes = all.map((c) => c.close), fast = smaOf(closes, 7).slice(warm), slow = smaOf(closes, 20).slice(warm), bars = all.slice(warm)
+    const x = (i) => SG.left + 6 + (i * (SG.right - SG.left - 12)) / (n - 1), bw = ((SG.right - SG.left) / n) * 0.56
+    const y = invertible([...bars.flatMap((b) => [b.high, b.low]), ...fast, ...slow], 18, 232)
+    let body = grid(18, 232, 4, y, (yy) => Math.round(y.inv(yy)).toLocaleString('en-US'), y(bars[n - 1].close))
+    body += '<g class="sg-plot">'
+    bars.forEach((b, i) => { const up = b.close >= b.open, cls = up ? 'up' : 'down'; body += `<path class="sg-wick ${cls}" d="M${fx(x(i))} ${y(b.high)}V${y(b.low)}"/><rect class="sg-body ${cls}" x="${fx(x(i) - bw / 2)}" y="${Math.min(y(b.open), y(b.close))}" width="${fx(bw)}" height="${Math.max(1.2, fx(Math.abs(y(b.open) - y(b.close))))}" rx="1"/><rect class="sg-vol ${cls}" x="${fx(x(i) - bw / 2)}" y="${fx(300 - b.volume * 44)}" width="${fx(bw)}" height="${fx(b.volume * 44)}" rx="1"/>` })
+    body += `<path class="sg-slow" d="${line(slow, x, y)}"/><path class="sg-fast" d="${line(fast, x, y)}"/></g>`
+    const xs = crossings(fast, slow, 1), golden = xs.filter((c) => c.up).pop(), death = xs.filter((c) => !c.up && (!golden || c.i < golden.i)).pop()
+    if (death) body += marker(x(death.i), y(slow[death.i]), 'sell', 1.5, 'DEATH CROSS', y(slow[death.i]) - 34)
+    if (golden) body += marker(x(golden.i), y(slow[golden.i]), 'buy', 1.8, 'GOLDEN CROSS · BUY', y(slow[golden.i]) + 16)
+    const last = bars[n - 1].close
+    body += lastTag(y(last), Math.round(last).toLocaleString('en-US')) + `<g class="sg-live"><circle class="sg-ring" cx="${fx(x(n - 1))}" cy="${y(last)}" r="5"/><circle cx="${fx(x(n - 1))}" cy="${y(last)}" r="3"/></g>`
+    body += `<g class="sg-key" transform="translate(${SG.left} 318)"><path class="sg-fast" d="M0 0h14"/><text x="20" y="4">SMA 7</text><path class="sg-slow" d="M76 0h14"/><text x="96" y="4">SMA 20</text><text x="170" y="4" class="sg-dimtxt">VOL</text></g>`
+    return body + times(338).replace(/class="sg-ax"/g, 'class="sg-ax sg-time"')
   },
-  rsi: {
-    kicker: 'Relative strength index', code: 'RSI / 02', title: ['A perspective', 'on the extremes.'], description: 'Look for stretched momentum.',
-    price: 'M0 150C40 150 45 60 90 60S150 300 200 300 260 40 310 40 360 220 410 220 490 100 540 100 570 160 600 160',
-    average: 'M0 85H600M0 255H600',
+  rsi() {
+    const warm = 16, n = 64
+    const all = candles(n + warm, (t) => 2250 + 40 * Math.sin(t * 13.5) + 12 * Math.sin(t * 31), 11, 9)
+    const closes = all.map((c) => c.close), rsi = rsiOf(closes).slice(warm), px = closes.slice(warm)
+    const x = (i) => SG.left + (i * (SG.right - SG.left)) / (n - 1)
+    const y = invertible(px, 18, 160), r = (v) => fx(296 - (v / 100) * (296 - 196))
+    let body = grid(18, 160, 3, y, (yy) => Math.round(y.inv(yy)).toLocaleString('en-US'), y(px[n - 1]))
+    body += `<rect class="sg-zone hot" x="${SG.left}" y="${r(100)}" width="${SG.right - SG.left}" height="${fx(r(70) - r(100))}"/><rect class="sg-zone cold" x="${SG.left}" y="${r(30)}" width="${SG.right - SG.left}" height="${fx(r(0) - r(30))}"/>`
+    body += `<path class="sg-level" d="M${SG.left} ${r(70)}H${SG.right}M${SG.left} ${r(30)}H${SG.right}"/><path class="sg-grid" d="M${SG.left} ${r(50)}H${SG.right}"/>`
+    body += [70, 50, 30].map((v) => `<text class="sg-ax" x="${SG.axis}" y="${fx(r(v) + 4)}" text-anchor="end">${v}</text>`).join('')
+    body += `<text class="sg-ax sg-dimtxt" x="${SG.left}" y="188">RSI 14</text>`
+    const area = line(px, x, y)
+    body += `<g class="sg-plot"><path class="sg-area" d="${area}L${fx(x(n - 1))} 160L${SG.left} 160Z"/><path class="sg-price" d="${area}"/><path class="sg-rsi" d="${line(rsi, x, r)}"/></g>`
+    const events = []
+    for (let i = 1; i < n; i++) {
+      if (rsi[i - 1] != null && rsi[i - 1] < 30 && rsi[i] >= 30) events.push({ i: i - 1, buy: true })
+      if (rsi[i - 1] != null && rsi[i - 1] > 70 && rsi[i] <= 70) events.push({ i: i - 1, buy: false })
+    }
+    events.slice(0, 5).forEach((e, k) => {
+      const cls = e.buy ? 'buy' : 'sell', d = 1.3 + k * 0.25
+      body += `<path class="sg-guide ${cls} sg-mk" style="--d:${d}s" d="M${fx(x(e.i))} ${y(px[e.i])}V${r(rsi[e.i])}"/>`
+      body += marker(x(e.i), y(px[e.i]), cls, d, k < 2 ? (e.buy ? 'BUY · OVERSOLD' : 'SELL · OVERBOUGHT') : '', e.buy ? y(px[e.i]) + 14 : y(px[e.i]) - 32)
+      body += marker(x(e.i), r(rsi[e.i]), cls, d + 0.1)
+    })
+    const last = px[n - 1]
+    body += lastTag(y(last), Math.round(last).toLocaleString('en-US'))
+    return body + times(326)
   },
-  macd: {
-    kicker: 'Moving average convergence', code: 'MACD / 03', title: ['Follow a shift', 'in direction.'], description: 'See momentum take a new shape.',
-    price: 'M0 190C70 280 140 290 205 220S320 60 390 80 520 230 600 150',
-    average: 'M0 170C70 200 140 270 205 240S320 110 390 115 520 180 600 170',
+  macd() {
+    const warm = 30, n = 60
+    const all = candles(n + warm, (t) => 2230 + 46 * Math.sin(t * 7.2 - 0.6) + 20 * t, 23, 7)
+    const closes = all.map((c) => c.close), fast = emaOf(closes, 12), slow = emaOf(closes, 26)
+    const macdAll = fast.map((f, i) => f - slow[i]), sigAll = emaOf(macdAll, 9)
+    const macd = macdAll.slice(warm), sig = sigAll.slice(warm), hist = macd.map((m, i) => m - sig[i]), px = closes.slice(warm)
+    const x = (i) => SG.left + 4 + (i * (SG.right - SG.left - 8)) / (n - 1), bw = ((SG.right - SG.left) / n) * 0.6
+    const y = invertible(px, 18, 160)
+    const lim = Math.max(...macd.map(Math.abs), ...sig.map(Math.abs)) * 1.1, m = (v) => fx(246 - (v / lim) * 50)
+    let body = grid(18, 160, 3, y, (yy) => Math.round(y.inv(yy)).toLocaleString('en-US'), y(px[n - 1]))
+    body += `<path class="sg-level" d="M${SG.left} 246H${SG.right}"/><text class="sg-ax" x="${SG.axis}" y="250" text-anchor="end">0</text><text class="sg-ax sg-dimtxt" x="${SG.left}" y="188">MACD 12 26 9</text>`
+    const area = line(px, x, y)
+    body += `<g class="sg-plot"><path class="sg-area" d="${area}L${fx(x(n - 1))} 160L${fx(x(0))} 160Z"/><path class="sg-price" d="${area}"/>`
+    hist.forEach((h, i) => { body += `<rect class="sg-hist ${h >= 0 ? 'up' : 'down'}${i > 0 && Math.abs(h) < Math.abs(hist[i - 1]) ? ' fading' : ''}" x="${fx(x(i) - bw / 2)}" y="${Math.min(m(h), 246)}" width="${fx(bw)}" height="${Math.max(0.8, fx(Math.abs(m(h) - 246)))}" rx="1"/>` })
+    body += `<path class="sg-sig" d="${line(sig, x, m)}"/><path class="sg-macd" d="${line(macd, x, m)}"/></g>`
+    const recent = crossings(macd, sig, 3).slice(-3), all3 = recent.length
+    recent.forEach((c, k) => {
+      const cls = c.up ? 'buy' : 'sell', d = 1.3 + k * 0.3
+      body += `<path class="sg-guide ${cls} sg-mk" style="--d:${d}s" d="M${fx(x(c.i))} ${y(px[c.i])}V${m(macd[c.i])}"/>`
+      body += marker(x(c.i), m(macd[c.i]), cls, d + 0.1) + marker(x(c.i), y(px[c.i]), cls, d, k === all3 - 1 ? (c.up ? 'BULLISH CROSS' : 'BEARISH CROSS') : '', y(px[c.i]) - 32)
+    })
+    const last = px[n - 1]
+    body += lastTag(y(last), Math.round(last).toLocaleString('en-US'))
+    body += `<g class="sg-key" transform="translate(${SG.left + 140} 184)"><path class="sg-macd" d="M0 0h14"/><text x="20" y="4">MACD</text><path class="sg-sig" d="M66 0h14"/><text x="86" y="4">SIGNAL</text></g>`
+    return body + times(326)
   },
 }
-document.querySelectorAll('[data-signal]').forEach((button) => button.addEventListener('click', () => {
-  const signal = signals[button.dataset.signal]
-  document.querySelectorAll('[data-signal]').forEach((tab) => tab.setAttribute('aria-pressed', String(tab === button)))
+function showSignal(name) {
+  const signal = signals[name]
+  document.querySelectorAll('[data-signal]').forEach((tab) => tab.setAttribute('aria-pressed', String(tab.dataset.signal === name)))
   document.querySelector('#signal-kicker').textContent = signal.kicker
   document.querySelector('.signal-meta .eyebrow:last-child').textContent = signal.code
   document.querySelector('#signal-title').replaceChildren(document.createTextNode(signal.title[0]), document.createElement('br'), document.createTextNode(signal.title[1]))
   document.querySelector('#signal-description').textContent = signal.description
-  document.querySelector('#chart-price').setAttribute('d', signal.price)
-  document.querySelector('#chart-average').setAttribute('d', signal.average)
-  document.querySelector('#chart-area').setAttribute('d', `${signal.price}V340H0Z`)
-  document.querySelector('#signal-chart').setAttribute('aria-label', `Illustrative ${signal.kicker.toLowerCase()}, not trading performance`)
+  const chart = document.querySelector('#signal-chart')
+  chart.setAttribute('viewBox', '0 0 600 344')
+  chart.innerHTML = charts[name]()
+  chart.setAttribute('aria-label', `Illustrative ${signal.kicker.toLowerCase()}, not trading performance`)
+}
+showSignal('sma')
+document.querySelectorAll('[data-signal]').forEach((button) => button.addEventListener('click', () => {
+  showSignal(button.dataset.signal)
   sectionMotion?.drawSignal()
 }))
 
@@ -300,13 +427,15 @@ function createSectionMotion() {
     drawing.forEach((animation) => animation.cancel())
     drawing = []
     if (disabled) return
-    const paths = [...document.querySelectorAll('#chart-price, #chart-average')]
-    paths.forEach((path, index) => drawing.push(path.animate([
-      { clipPath: 'inset(-8% 100% -8% -8%)' },
-      { clipPath: 'inset(-8% -8% -8% -8%)' },
-    ], { duration: short ? 700 : 1700, delay: short ? index * 50 : 280 + index * 130, easing: 'cubic-bezier(.25,.7,.2,1)', fill: 'backwards' })))
-    const area = document.querySelector('#chart-area')
-    drawing.push(area.animate([{ opacity: 0 }, { opacity: 1 }], { duration: short ? 500 : 1200, delay: short ? 80 : 600, fill: 'backwards', easing: ease }))
+    const plot = document.querySelector('#signal-chart .sg-plot')
+    if (plot) drawing.push(plot.animate([
+      { clipPath: 'inset(-10% 100% -10% -2%)' },
+      { clipPath: 'inset(-10% -2% -10% -2%)' },
+    ], { duration: short ? 800 : 1700, delay: short ? 0 : 280, easing: 'cubic-bezier(.25,.7,.2,1)', fill: 'backwards' }))
+    document.querySelectorAll('#signal-chart .sg-mk, #signal-chart .sg-last, #signal-chart .sg-live').forEach((el) => {
+      const d = parseFloat(el.style.getPropertyValue('--d')) || 1.9
+      drawing.push(el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 450, delay: (short ? d * 0.55 : d) * 1000, fill: 'backwards', easing: ease }))
+    })
   }
 
   // Headings assemble letter by letter; adjacent content follows in short waves.
