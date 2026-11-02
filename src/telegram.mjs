@@ -186,7 +186,10 @@ export function startTelegram({ start = true, botInfo } = {}) {
   // Only allowlisted accounts (TELEGRAM_ALLOWED_USERS) can use the bot.
   bot.use(async (ctx, next) => {
     if (!ctx.from || !telegramAllowed(ctx.from.id, ctx.from.username)) {
-      if (ctx.chat?.type === 'private') await reply(ctx, 'Swordfish is invite-only for now.')
+      // Show the ID so the person can pass it to whoever runs this bot to be added.
+      if (ctx.chat?.type === 'private' && ctx.from) {
+        await reply(ctx, `Swordfish is invite-only for now.\n\nTo get access, send this to the person who invited you:\n<code>${ctx.from.id}</code>${ctx.from.username ? ` (@${ctx.from.username})` : ''}`)
+      }
       return
     }
     return next()
