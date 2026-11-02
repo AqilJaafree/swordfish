@@ -378,9 +378,9 @@ export function startTelegram({ start = true, botInfo } = {}) {
         // A button back to the dashboard. Telegram rejects URL buttons for hosts like localhost,
         // so fall back to showing the address as text until WEB_URL is a public domain.
         const text = '✅ <b>Signed in.</b> Your dashboard is connected.'
-        return void (await show(ctx, { text, kb: new InlineKeyboard().url('🌐 Back to dashboard', config.webUrl).row().text('📋 Menu', 'm:menu') }).catch((err) => {
+        return void (await show(ctx, { text, kb: new InlineKeyboard().url('🌐 Back to dashboard', `${config.webUrl}/app`).row().text('📋 Menu', 'm:menu') }).catch((err) => {
           if (!/url/i.test(err.description ?? '')) throw err
-          return show(ctx, { text: `${text}\nBack to your dashboard: <code>${esc(config.webUrl)}</code>`, kb: new InlineKeyboard().text('📋 Menu', 'm:menu') })
+          return show(ctx, { text: `${text}\nBack to your dashboard: <code>${esc(config.webUrl)}/app</code>`, kb: new InlineKeyboard().text('📋 Menu', 'm:menu') })
         }))
       }
       if (kind === 'authx') {

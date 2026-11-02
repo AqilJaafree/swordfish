@@ -20,7 +20,13 @@ npm test
 BOTS_ENABLED=true npm start
 ```
 
-Open the dashboard at http://localhost:8787. In Telegram, send `/start` to your bot to get a wallet, then `/web` for a one-time dashboard login link.
+Open http://localhost:8787 for the landing page and http://localhost:8787/app for the dashboard. Once you've opened the dashboard, `/` takes you straight to it; the landing page stays at `/landing`, and the dashboard sidebar links back to it. In Telegram, send `/start` to your bot to get a wallet, then `/web` for a one-time dashboard login link.
+
+The cinematic landing page is the home page (also at `/landing`). The hero is an original eight-second Blender render of the Swordfish mark in titanium, opening into engineered layers and reassembling under moving studio light. The editable scene and generator are in `design/metallic-hero/`. Select a scene to pause and inspect it, or use the play/pause control. Playback pauses offscreen and respects reduced-motion settings, with a still poster as the fallback. The dashboard is at `/app`.
+
+To preview the landing page independently, run `npm run landing` and open http://localhost:8788/landing. App links lead to the dashboard on port 8787. Set `LANDING_PORT` or `LANDING_APP_URL` to override those defaults.
+
+Sections enter with staggered heading, card, chart, and software-layer animations. Entrances replay only after leaving the viewport completely, preserve native scrolling, and show all content immediately when animations are paused or reduced motion is enabled.
 
 ## Telegram commands
 
