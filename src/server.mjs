@@ -42,7 +42,7 @@ import * as paper from './paper.mjs'
 import { getPrice } from './pricing.mjs'
 import { analyze, enabledPlugins, loadPlugins } from './ta/index.mjs'
 import * as db from './db.mjs'
-import { botLevels, catalog, createBotFor, deleteBot, previewStrategy, ownedBot, setStatus, startEngine, walletBalances } from './engine.mjs'
+import { botLevels, catalog, committedFunds, createBotFor, deleteBot, previewStrategy, ownedBot, setStatus, startEngine, walletBalances } from './engine.mjs'
 import { startTelegram } from './telegram.mjs'
 import * as auth from './auth.mjs'
 
@@ -156,7 +156,12 @@ const routes = [
   ['/api/me', async (_, __, ___, ctx) => {
     const user = sessionUser(ctx)
     const wallet = db.getWallet(user.id)
-    return { id: user.id, username: user.username, wallet: wallet?.address ?? null, balances: wallet ? await walletBalances(wallet.address) : null }
+    // `live`: what running live bots have reserved, and the limits /live checks, for the wallet's readiness list.
+    const { bots: b } = config
+    return {
+      id: user.id, username: user.username, wallet: wallet?.address ?? null, balances: wallet ? await walletBalances(wallet.address) : null,
+      live: { reserved: committedFunds(user.id), minGasHsk: b.minGasHsk, maxBudgetUsd: b.liveMaxBudgetUsd, maxTradeUsd: b.liveMaxTradeUsd, dailyLossPct: b.liveDailyLossPct },
+    }
   }],
   ['/api/me/bots', async (_, __, ___, ctx) => db.userBots(sessionUser(ctx).id).map(publicBot)],
   ['/api/me/bots', async (_, __, body, ctx) => publicBot(createBotFor(sessionUser(ctx), body)), 'POST'],

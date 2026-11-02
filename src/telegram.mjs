@@ -143,7 +143,7 @@ function leaderboardScreen(mode) {
 }
 
 function strategiesScreen() {
-  const lines = catalog().map((s) => `<b>${s.name}</b>${s.llm ? ' (Claude Haiku)' : ''}: ${esc(s.description)}${Object.keys(s.params).length ? `\n   params: ${esc(JSON.stringify(s.params))}` : ''}`)
+  const lines = catalog().map((s) => `<b>${s.name}</b>${s.llm && s.model ? ` (${esc(s.model)})` : ''}: ${esc(s.description)}${Object.keys(s.params).length ? `\n   params: ${esc(JSON.stringify(s.params))}` : ''}`)
   return { text: `${lines.join('\n\n')}\n\n<b>Exit rules for any bot</b> (0 = off): ${esc(JSON.stringify(RISK_DEFAULTS))}`, kb: back(new InlineKeyboard().text('➕ New bot', 'm:new')) }
 }
 
@@ -374,9 +374,14 @@ export function startTelegram({ start = true, botInfo } = {}) {
       if (kind === 'auth') {
         const ok = approveLogin(a, user.id)
         await ctx.answerCallbackQuery({ text: ok ? 'Signed in' : 'Request expired' })
-        return void (await show(ctx, ok
-          ? { text: '✅ <b>Signed in.</b> Your dashboard is connected; switch back to your browser.', kb: new InlineKeyboard().text('📋 Menu', 'm:menu') }
-          : loginScreen(a)))
+        if (!ok) return void (await show(ctx, loginScreen(a)))
+        // A button back to the dashboard. Telegram rejects URL buttons for hosts like localhost,
+        // so fall back to showing the address as text until WEB_URL is a public domain.
+        const text = '✅ <b>Signed in.</b> Your dashboard is connected.'
+        return void (await show(ctx, { text, kb: new InlineKeyboard().url('🌐 Back to dashboard', config.webUrl).row().text('📋 Menu', 'm:menu') }).catch((err) => {
+          if (!/url/i.test(err.description ?? '')) throw err
+          return show(ctx, { text: `${text}\nBack to your dashboard: <code>${esc(config.webUrl)}</code>`, kb: new InlineKeyboard().text('📋 Menu', 'm:menu') })
+        }))
       }
       if (kind === 'authx') {
         denyLogin(a)

@@ -1,12 +1,12 @@
 # Swordfish
 
-Strategy trading bots on **HashKey Chain** (chain 177): live prices from on-chain pools, pluggable technical analysis, paper and real trading, a Claude Haiku strategy, a Telegram bot and a web leaderboard.
+Strategy trading bots on **HashKey Chain** (chain 177): live prices from on-chain pools, pluggable technical analysis, paper and real trading, an AI strategy (MiniMax-M3 with fallbacks, or Claude Haiku), a Telegram bot and a web leaderboard.
 
 ## Features
 
 - **Prices and swaps**: Uniswap V3 (SwapRouter02), HyperIndex V2 and DODO pools; best route direct or via WHSK/USDT.
 - **Technical analysis**: SMA, EMA, RSI, MACD and Bollinger Bands as plugins (`TA_INDICATORS`).
-- **Strategies** (`src/strategies/`): `sma-cross`, `macd-trend`, `bollinger-reversion`, `breakout`, `rsi-reversion` and `claude` (Claude Haiku decides from the indicators, pool price and trading cost). Every bot can add a stop loss, take profit, trailing stop and drawdown halt.
+- **Strategies** (`src/strategies/`): `sma-cross`, `macd-trend`, `bollinger-reversion`, `breakout`, `rsi-reversion` and `claude` (an AI model decides from the indicators, pool price and trading cost). Every bot can add a stop loss, take profit, trailing stop and drawdown halt.
 - **One-sided liquidity** (`lp-range`, `src/lp.mjs`): deposits the bot's USDT in a Uniswap V3 range just below the price, which buys as the price falls through it and earns the 0.3% pool fee. Once filled, the coin goes into a range above the entry to sell back (`cycle=1`), and a USDT range left far below a rising price is moved up (`recenterPct`). Params: `rangeWidthPct`, `offsetPct`, `recenterPct`, `cycle`, `stopLossPct`. Live positions are NFTs from the NonfungiblePositionManager `0xDF0A9b833Db0E4CeEa103A4408f3B68e7FC0cad5`.
 - **Bots**: each Telegram user gets a custodial wallet (keys encrypted with AES-256-GCM) and can run up to 5 bots, in paper mode or live with real funds.
 - **Dashboard**: leaderboard (P&L % after costs, paper and live ranked separately), your wallet and bots, and the strategy catalog.

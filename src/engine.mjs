@@ -66,6 +66,7 @@ export const catalog = () =>
     params: { ...s.defaults },
     requires: s.requires,
     llm: s.name === 'claude',
+    model: s.modelLabel?.() ?? null,
     lp: !!s.lp,
   }))
 
@@ -109,7 +110,7 @@ export function createBotFor(user, { name, strategy, assets, timeframe = '1h', i
   const mine = db.userBots(user.id)
   if (mine.length >= config.bots.maxPerUser) throw httpError(400, `Bot limit reached (${config.bots.maxPerUser})`)
   if (strategy === 'claude' && mine.filter((b) => b.strategy === 'claude').length >= config.bots.maxClaudePerUser) {
-    throw httpError(400, `Claude bot limit reached (${config.bots.maxClaudePerUser})`)
+    throw httpError(400, `AI bot limit reached (${config.bots.maxClaudePerUser})`)
   }
   const clean = cleanParams(s, params)
   return db.createBot({
@@ -199,7 +200,7 @@ const holdsAssets = (b) => Object.keys(b.positions).length > 0 || !!b.lp?.range
  * Amounts per asset that running or halted live bots are trading with (except
  * bot `exceptId`), plus the HSK they need for gas.
  */
-function committedFunds(userId, exceptId = null) {
+export function committedFunds(userId, exceptId = null) {
   const out = {}
   for (const b of db.userBots(userId).filter((b) => isLive(b) && b.status !== 'stopped' && b.id !== exceptId)) {
     out.usdt = (out.usdt ?? 0) + b.cash
@@ -691,7 +692,7 @@ const PREVIEW_FEE_PCT = 0.3 // per swap; HashKey V3 pools charge 0.3%
 /**
  * Replay a strategy over recent market candles: its indicator lines and the
  * buy/sell signals it would have produced, one position at a time, with exit
- * rules and pool fees applied. Claude is not replayed (one LLM call per candle).
+ * rules and pool fees applied. The AI strategy is not replayed (one LLM call per candle).
  */
 const previewCache = new Map() // key -> { at, promise }; replays are pure for a given candle set
 const PREVIEW_TTL_MS = 60_000
