@@ -1196,10 +1196,11 @@ function bindCopy(root) {
   root.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => copyText(b.dataset.copy, 'Copied')))
 }
 
-const LOGIN_TIP = `<span class="need-tip" tabindex="0" role="button" aria-describedby="login-tip"><i aria-hidden="true">?</i>What do I need?<span class="need-tip-bubble" id="login-tip" role="tooltip">
-    <b>All you need is a Telegram account.</b>
-    <span>No BotFather, bot token or API key. The Swordfish bot already exists, so you only open it and press Start.</span>
-    <span>No wallet setup either. Your trading wallet is created on first sign-in, and new bots start on paper money.</span>
+const LOGIN_TIP = `<span class="need-tip" tabindex="0" role="button" aria-describedby="login-tip"><i aria-hidden="true">?</i>New here? How it works<span class="need-tip-bubble" id="login-tip" role="tooltip">
+    <b>Your Telegram account is your Swordfish account.</b>
+    <span>Pressing <b>Start</b> in the Swordfish bot creates your account and your own wallet on HashKey Chain. No sign-up form, nothing to install.</span>
+    <span>Then, in Telegram or here, you can pick a strategy, run it on paper money first, fund your wallet to go live, follow every trade and climb the P&amp;L leaderboard.</span>
+    <span>Next time, signing in is one tap on <b>Approve</b>.</span>
     <span class="need-tip-foot">No Telegram yet? It's free at <a href="https://telegram.org/apps" target="_blank" rel="noopener">telegram.org</a>.</span>
   </span></span>`
 
@@ -1235,7 +1236,7 @@ async function openLogin() {
     ${known ? '' : LOGIN_TIP}
     <ol class="login-steps${known ? ' compact' : ''}" id="login-steps">
       <li class="active"><span class="n">1</span><div><b>Open the bot</b><small>Telegram Web or the app</small></div></li>
-      <li><span class="n">2</span><div><b>Press Start</b><small>Your sign-in code is sent for you</small></div></li>
+      <li><span class="n">2</span><div><b>Press Start</b><small>${known ? 'Your sign-in code is sent for you' : 'Creates your account and wallet'}</small></div></li>
       <li><span class="n">3</span><div><b>Tap ✅ Approve</b><small>This browser signs in by itself</small></div></li>
     </ol>
     <button class="btn-accent" id="login-primary" type="button">${label[method]}</button>
