@@ -21,6 +21,7 @@
 // Multi-user bots (BOTS_ENABLED=true), Telegram login via /web links:
 //   GET  /                         dashboard (public/)
 //   GET  /auth/login?token=...     one-time link from the Telegram bot's /web
+//   POST /api/auth/request         start a sign-in approved in Telegram; GET /api/auth/poll?code= collects it
 //   POST /api/logout
 //   GET  /api/strategies
 //   GET  /api/leaderboard?mode=paper|live
@@ -43,6 +44,7 @@ import { analyze, enabledPlugins, loadPlugins } from './ta/index.mjs'
 import * as db from './db.mjs'
 import { botLevels, catalog, createBotFor, deleteBot, previewStrategy, ownedBot, setStatus, startEngine, walletBalances } from './engine.mjs'
 import { startTelegram } from './telegram.mjs'
+import * as auth from './auth.mjs'
 
 const httpError = (status, message) => Object.assign(new Error(message), { status })
 
@@ -106,7 +108,13 @@ const publicBotById = (id) => {
   return b
 }
 
-const STATIC = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] }
+const STATIC = {
+  '/': ['index.html', 'text/html'],
+  '/app.js': ['app.js', 'text/javascript'],
+  '/style.css': ['style.css', 'text/css'],
+  '/art.js': ['art.js', 'text/javascript'],
+  '/charts.js': ['charts.js', 'text/javascript'],
+}
 const staticFile = (name, type) => async () =>
   raw(200, { 'content-type': `${type}; charset=utf-8` }, await readFile(new URL(`../public/${name}`, import.meta.url)))
 
@@ -122,6 +130,21 @@ const routes = [
     if (!user) return raw(401, { 'content-type': 'text/plain' }, 'Link expired or already used. Send /web to the Telegram bot for a new one.')
     const sid = db.issueToken(user.id, 'session', 30 * 86_400)
     return raw(302, { location: '/', 'set-cookie': `sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86_400}` }, '')
+  }],
+  ['/api/auth/request', async () => {
+    botsOnly()
+    const { code, secret } = auth.requestLogin()
+    return raw(200, { 'content-type': 'application/json', 'set-cookie': `lr=${secret}; Path=/api/auth; HttpOnly; SameSite=Lax; Max-Age=${auth.LOGIN_TTL_SEC}` },
+      JSON.stringify({ code, bot: config.telegramUsername ?? null, ttlSec: auth.LOGIN_TTL_SEC }))
+  }, 'POST'],
+  ['/api/auth/poll', async (_, q, __, ctx) => {
+    botsOnly()
+    const r = auth.collectLogin(q.get('code') ?? '', ctx.cookies.lr ?? '')
+    const user = r.status === 'approved' && db.getUser(r.userId)
+    if (!user) return { status: r.status === 'approved' ? 'expired' : r.status }
+    const sid = db.issueToken(user.id, 'session', 30 * 86_400)
+    return raw(200, { 'content-type': 'application/json', 'set-cookie': [`sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86_400}`, 'lr=; Path=/api/auth; Max-Age=0'] },
+      JSON.stringify({ status: 'approved', username: user.username }))
   }],
   ['/api/logout', async (_, __, ___, ctx) => {
     if (ctx.sid) db.revokeToken(ctx.sid)
@@ -259,7 +282,8 @@ const server = createServer(async (req, res) => {
     const params = Object.fromEntries(route.names.map((n, i) => [n, decodeURIComponent(m[i + 1])]))
     try {
       const body = route.method === 'POST' ? await readJson(req) : undefined
-      const out = await route.handler(params, url.searchParams, body, { sid: cookies(req).sid })
+      const jar = cookies(req)
+      const out = await route.handler(params, url.searchParams, body, { sid: jar.sid, cookies: jar })
       if (out?.[RAW]) {
         res.writeHead(out[RAW].status, out[RAW].headers)
         return res.end(out[RAW].body)
