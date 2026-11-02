@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "landing": "node src/landing-preview.mjs",
     "test": "node --test 'test/**/*.test.mjs'",
     "quote": "node --env-file-if-exists=.env src/swap.mjs",
     "swap": "node --env-file-if-exists=.env src/swap.mjs --send",

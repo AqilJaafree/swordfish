@@ -19,7 +19,8 @@
 //   POST /paper/reset
 //
 // Multi-user bots (BOTS_ENABLED=true), Telegram login via /web links:
-//   GET  /                         dashboard (public/)
+//   GET  /                         landing page; /app after the dashboard has been opened once
+//   GET  /app                      dashboard (public/index.html); /landing always shows the landing page
 //   GET  /auth/login?token=...     one-time link from the Telegram bot's /web
 //   POST /api/auth/request         start a sign-in approved in Telegram; GET /api/auth/poll?code= collects it
 //   POST /api/logout
@@ -45,6 +46,7 @@ import * as db from './db.mjs'
 import { botLevels, catalog, committedFunds, createBotFor, deleteBot, previewStrategy, ownedBot, setStatus, startEngine, walletBalances } from './engine.mjs'
 import { startTelegram } from './telegram.mjs'
 import * as auth from './auth.mjs'
+import { landingMedia } from './landing-media.mjs'
 
 const httpError = (status, message) => Object.assign(new Error(message), { status })
 
@@ -108,8 +110,13 @@ const publicBotById = (id) => {
   return b
 }
 
+// `/` is the landing page until someone opens the dashboard at /app; from then on `/` takes
+// them straight to /app (a cookie remembers it). The landing page stays at /landing.
 const STATIC = {
-  '/': ['index.html', 'text/html'],
+  '/landing': ['landing.html', 'text/html'],
+  '/landing.html': ['landing.html', 'text/html'],
+  '/landing.css': ['landing.css', 'text/css'],
+  '/landing.js': ['landing.js', 'text/javascript'],
   '/app.js': ['app.js', 'text/javascript'],
   '/style.css': ['style.css', 'text/css'],
   '/art.js': ['art.js', 'text/javascript'],
@@ -122,14 +129,26 @@ function paperOnly() {
   if (!config.paper.enabled) throw httpError(404, 'Paper trading is disabled; set PAPER_ENABLED=true')
 }
 
+const HOME_COOKIE = 'sf_home=app; Path=/; Max-Age=31536000; SameSite=Lax'
+const page = (name) => readFile(new URL(`../public/${name}`, import.meta.url))
+
 const routes = [
+  ['/', async (_, __, ___, ctx) =>
+    ctx.cookies.sf_home === 'app'
+      ? raw(302, { location: '/app' }, '')
+      : raw(200, { 'content-type': 'text/html; charset=utf-8' }, await page('landing.html'))],
+  ['/app', async () => raw(200, { 'content-type': 'text/html; charset=utf-8', 'set-cookie': HOME_COOKIE }, await page('index.html'))],
   ...Object.entries(STATIC).map(([path, [name, type]]) => [path, staticFile(name, type)]),
+  ['/landing-media/:asset', async ({ asset }, _, __, ctx) => {
+    const result = await landingMedia(asset, ctx.range)
+    return raw(result.status, result.headers, result.body)
+  }],
   ['/auth/login', async (_, q) => {
     botsOnly()
     const user = db.useToken(q.get('token') ?? '', 'login', { consume: true })
     if (!user) return raw(401, { 'content-type': 'text/plain' }, 'Link expired or already used. Send /web to the Telegram bot for a new one.')
     const sid = db.issueToken(user.id, 'session', 30 * 86_400)
-    return raw(302, { location: '/', 'set-cookie': `sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86_400}` }, '')
+    return raw(302, { location: '/app', 'set-cookie': `sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 86_400}` }, '')
   }],
   ['/api/auth/request', async () => {
     botsOnly()
@@ -288,7 +307,7 @@ const server = createServer(async (req, res) => {
     try {
       const body = route.method === 'POST' ? await readJson(req) : undefined
       const jar = cookies(req)
-      const out = await route.handler(params, url.searchParams, body, { sid: jar.sid, cookies: jar })
+      const out = await route.handler(params, url.searchParams, body, { sid: jar.sid, cookies: jar, range: req.headers.range })
       if (out?.[RAW]) {
         res.writeHead(out[RAW].status, out[RAW].headers)
         return res.end(out[RAW].body)

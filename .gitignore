@@ -14,3 +14,8 @@ CLAUDE.md
 CLAUDE.local.md
 *.local.md
 notes/
+
+# Archived third-party reference media (see public/landing-media/SOURCES.md): kept locally, never published
+public/landing-media/hero.webm
+public/landing-media/opportunity.*
+public/landing-media/chamber-*
