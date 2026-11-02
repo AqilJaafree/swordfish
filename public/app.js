@@ -1107,8 +1107,15 @@ async function logout() {
   if (!$('#mine').hidden) loadMine()
 }
 
+// Remembered per browser: who signed in here before, and which Telegram they used.
+const remember = {
+  get: (k) => { try { return localStorage.getItem(k) } catch { return null } },
+  set: (k, v) => { try { localStorage.setItem(k, v) } catch {} },
+}
+
 function onSignedIn(user) {
   me = user
+  remember.set('sf_known_user', user.username)
   renderAccount()
   toast(`Connected as @${user.username}`)
   if (!$('#mine').hidden) loadMine()
@@ -1189,56 +1196,102 @@ function bindCopy(root) {
   root.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => copyText(b.dataset.copy, 'Copied')))
 }
 
+const LOGIN_TIP = `<span class="need-tip" tabindex="0" role="button" aria-describedby="login-tip"><i aria-hidden="true">?</i>What do I need?<span class="need-tip-bubble" id="login-tip" role="tooltip">
+    <b>All you need is a Telegram account.</b>
+    <span>No BotFather, bot token or API key. The Swordfish bot already exists, so you only open it and press Start.</span>
+    <span>No wallet setup either. Your trading wallet is created on first sign-in, and new bots start on paper money.</span>
+    <span class="need-tip-foot">No Telegram yet? It's free at <a href="https://telegram.org/apps" target="_blank" rel="noopener">telegram.org</a>.</span>
+  </span></span>`
+
 async function openLogin() {
   stopLogin()
   drawAuthArt()
   renderAuthFloat()
   const dlg = $('#login-dialog')
   const body = $('#login-body')
-  body.innerHTML = `<h2>Sign In Account</h2><p class="sub">Preparing a secure sign-in request…</p>`
+  const known = remember.get('sf_known_user')
+  const title = known ? 'Welcome back' : 'Sign in with Telegram'
+  body.innerHTML = `<h2>${title}</h2><p class="sub">Preparing a secure sign-in request…</p>`
   if (!dlg.open) dlg.showModal()
   let req
   try {
     req = await api('/api/auth/request', { method: 'POST' })
   } catch (err) {
-    return void (body.innerHTML = `<h2>Sign In Account</h2><p class="sub">Sign-in is unavailable right now.</p>
+    return void (body.innerHTML = `<h2>${title}</h2><p class="sub">Sign-in is unavailable right now.</p>
       <div class="field bad"><label>Error</label><div class="box"><span class="grow">${esc(err.message)}</span></div></div>`)
   }
   const bot = req.bot ?? info.telegramBot
   const start = `login_${req.code}`
-  const web = `https://web.telegram.org/k/#?tgaddr=${encodeURIComponent(`tg://resolve?domain=${bot}&start=${start}`)}`
-  const app = `https://t.me/${encodeURIComponent(bot)}?start=${start}`
+  const links = {
+    web: `https://web.telegram.org/k/#?tgaddr=${encodeURIComponent(`tg://resolve?domain=${bot}&start=${start}`)}`,
+    app: `https://t.me/${encodeURIComponent(bot)}?start=${start}`,
+  }
+  const method = remember.get('sf_tg_method') === 'app' ? 'app' : 'web'
+  const other = method === 'web' ? 'app' : 'web'
+  const label = { web: 'Open Telegram Web', app: 'Open Telegram app' }
   login = { code: req.code, expires: Date.now() + req.ttlSec * 1000 }
-  body.innerHTML = `<h2>Sign In Account</h2>
-    <p class="sub">Approve this browser from your Telegram account</p>
-    <div class="field"><label>Telegram bot</label><div class="box"><span class="grow">@${esc(bot)}</span>${copyBtn(`@${bot}`)}</div></div>
-    <div class="field"><label>Sign-in code</label><div class="box"><code class="grow">/start ${start}</code>${copyBtn(`/start ${start}`)}</div>
-      <p class="hint">Sent for you when you open the bot. Expires in <span id="login-ttl">10:00</span></p></div>
-    <div class="field wait" id="login-state"><label>Status</label><div class="box"><span class="spin"></span><span class="grow">Waiting for approval in Telegram</span></div>
-      <p class="hint">Press <b>Start</b> in the chat, then tap ✅ Approve sign-in.</p></div>
-    <button class="btn-accent" id="login-web" type="button">Open Telegram Web</button>
-    <p class="auth-alt">Have the Telegram app? <a href="${app}" target="_blank">Open in app</a></p>`
+  body.innerHTML = `<h2>${title}</h2>
+    <p class="sub">${known ? `Approve this browser as <b>@${esc(known)}</b>. It takes one tap in Telegram.` : 'No password or sign-up form. Your Telegram account is your login.'}</p>
+    ${known ? '' : LOGIN_TIP}
+    <ol class="login-steps${known ? ' compact' : ''}" id="login-steps">
+      <li class="active"><span class="n">1</span><div><b>Open the bot</b><small>Telegram Web or the app</small></div></li>
+      <li><span class="n">2</span><div><b>Press Start</b><small>Your sign-in code is sent for you</small></div></li>
+      <li><span class="n">3</span><div><b>Tap ✅ Approve</b><small>This browser signs in by itself</small></div></li>
+    </ol>
+    <button class="btn-accent" id="login-primary" type="button">${label[method]}</button>
+    <p class="auth-alt">${method === 'web' ? 'Have the Telegram app?' : 'No app on this device?'} <button type="button" id="login-other">${label[other]}</button></p>
+    <div class="login-status wait" id="login-state"><span class="spin"></span><span class="grow">Waiting for you in Telegram</span><span class="ttl" id="login-ttl">10:00</span></div>
+    <details class="login-manual"><summary>Link didn't open? Use the code instead</summary>
+      <div class="field"><label>1. Find this bot in Telegram</label><div class="box"><span class="grow">@${esc(bot)}</span>${copyBtn(`@${bot}`)}</div></div>
+      <div class="field"><label>2. Send it this message</label><div class="box"><code class="grow">/start ${start}</code>${copyBtn(`/start ${start}`)}</div></div>
+    </details>`
   bindCopy(body)
-  // Opened from script (not a plain link) so this page keeps a handle and can close the tab.
-  $('#login-web').addEventListener('click', () => {
-    telegramTab = open(web, 'swordfish-telegram')
-    if (!telegramTab) location.href = web
+  const steps = [...body.querySelectorAll('#login-steps li')]
+  const setStatus = (cls, html) => {
+    $('#login-state').className = `login-status ${cls}`
+    $('#login-state').innerHTML = html
+  }
+  const reach = (n) => steps.forEach((li, i) => {
+    li.classList.toggle('done', i < n)
+    li.classList.toggle('active', i === n)
   })
+  const ttlBox = () => `<span class="ttl" id="login-ttl">${$('#login-ttl')?.textContent ?? ''}</span>`
+  // Opened from script (not a plain link) so this page keeps a handle and can close the tab.
+  const go = (m) => {
+    remember.set('sf_tg_method', m)
+    if (m === 'web') {
+      telegramTab = open(links.web, 'swordfish-telegram')
+      if (!telegramTab) location.href = links.web
+    } else {
+      open(links.app, '_blank', 'noopener')
+    }
+    if (login && !login.opened) {
+      reach(1)
+      setStatus('wait', `<span class="spin"></span><span class="grow">Telegram is opening. Press <b>Start</b> in the chat</span>${ttlBox()}`)
+    }
+  }
+  $('#login-primary').addEventListener('click', () => go(method))
+  $('#login-other').addEventListener('click', () => go(other))
   const tick = async () => {
     if (!login) return
     const left = Math.max(0, login.expires - Date.now())
-    $('#login-ttl').textContent = `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, '0')}`
+    if ($('#login-ttl')) $('#login-ttl').textContent = `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, '0')}`
     const r = await api(`/api/auth/poll?code=${encodeURIComponent(login.code)}`).catch(() => ({ status: 'pending' }))
     if (!login) return
-    if (r.status === 'approved') {
+    if (r.status === 'opened' && !login.opened) {
+      login.opened = true
+      reach(2)
+      setStatus('wait', `<span class="spin"></span><span class="grow">Chat open. Tap <b>✅ Approve sign-in</b></span>${ttlBox()}`)
+    } else if (r.status === 'approved') {
       stopLogin()
       try {
         telegramTab?.close()
       } catch {}
       telegramTab = null
       focus()
-      $('#login-state').className = 'field ok'
-      $('#login-state .box').innerHTML = `${icon('check')}<span class="grow">Approved as @${esc(r.username)}</span>`
+      remember.set('sf_known_user', r.username)
+      reach(3)
+      setStatus('ok', `${icon('check')}<span class="grow">Approved as @${esc(r.username)}</span>`)
       const user = await api('/api/me').catch(() => null)
       setTimeout(() => {
         body.innerHTML = `<div class="login-done">${CHECK}<h2>Connected</h2><p class="sub">Signed in as <b>@${esc(r.username)}</b>. Loading your wallet and bots…</p></div>`
@@ -1250,10 +1303,8 @@ async function openLogin() {
       }, 2000)
     } else if (r.status === 'expired' || left === 0) {
       stopLogin()
-      $('#login-state').className = 'field bad'
-      $('#login-state .box').innerHTML = `<span class="grow">Request expired</span>`
-      $('#login-state .hint').textContent = 'Sign-in requests last 10 minutes. Start a new one to continue.'
-      body.querySelector('.btn-accent').outerHTML = `<button class="btn-accent" id="login-retry" type="button">Try again</button>`
+      setStatus('bad', `<span class="grow">Request expired. Sign-in links last 10 minutes.</span>`)
+      $('#login-primary').outerHTML = `<button class="btn-accent" id="login-retry" type="button">Start a new sign-in</button>`
       $('#login-retry').addEventListener('click', openLogin)
     }
   }

@@ -7,7 +7,7 @@ import * as db from './db.mjs'
 import { catalog, closeBot, createBotFor, deleteBot, deleteWallet, events, goLive, importWallet, ownedBot, RISK_DEFAULTS, setStatus, walletBalances, withdraw, withdrawAll } from './engine.mjs'
 import { createWallet, exportKey } from './vault.mjs'
 import { findAsset } from './assets.mjs'
-import { approveLogin, denyLogin, loginPending } from './auth.mjs'
+import { approveLogin, denyLogin, loginPending, markLoginOpened } from './auth.mjs'
 
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
 const usd = (n) => (n == null ? '-' : `$${Number(n).toFixed(2)}`)
@@ -210,7 +210,9 @@ export function startTelegram({ start = true, botInfo } = {}) {
   bot.command(['start', 'menu'], (ctx) => {
     const user = userOf(ctx)
     const payload = args(ctx)[0] ?? ''
-    return send(ctx, payload.startsWith('login_') ? loginScreen(payload.slice(6)) : menuScreen(user))
+    if (!payload.startsWith('login_')) return send(ctx, menuScreen(user))
+    markLoginOpened(payload.slice(6))
+    return send(ctx, loginScreen(payload.slice(6)))
   })
   bot.command('help', (ctx) => reply(ctx, HELP, { reply_markup: new InlineKeyboard().text('📋 Menu', 'm:menu') }))
   bot.command('wallet', async (ctx) => send(ctx, await walletScreen(userOf(ctx))))

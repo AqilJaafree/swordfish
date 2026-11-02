@@ -663,6 +663,48 @@ dialog.auth::backdrop { background: rgb(40 40 40 / 0.72); backdrop-filter: blur(
 .btn-accent:active { transform: translateY(1px); }
 .auth-alt { margin: 16px 0 0; text-align: center; font-size: 14.5px; color: #a8a8a8; }
 .auth-alt a, .auth-alt button { color: #fff; border: 0; background: none; font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
+/* Sign-in: three steps that tick off as Telegram reports progress. */
+.login-steps { list-style: none; margin: 0 0 20px; padding: 0; display: grid; gap: 6px; }
+.login-steps li { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 10px; background: #111; border: 1px solid #1e1e1e; color: #8a8a8a; transition: border-color 0.3s, background 0.3s, color 0.3s; }
+.login-steps li b { display: block; font-size: 14px; font-weight: 500; color: inherit; }
+.login-steps li small { font-size: 12px; color: #6f6f6f; }
+.login-steps .n { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; flex: none; border: 1px solid #333; font-size: 12px; font-weight: 600; transition: background 0.3s, border-color 0.3s, color 0.3s; }
+.login-steps li.active { color: #fff; border-color: rgb(126 224 108 / 0.45); background: #131712; }
+.login-steps li.active .n { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 4px rgb(126 224 108 / 0.12); }
+.login-steps li.done { color: #cfcfcf; }
+.login-steps li.done .n { background: var(--accent); border-color: var(--accent); color: transparent; position: relative; }
+.login-steps li.done .n::after { content: ''; position: absolute; width: 9px; height: 5px; border: solid #0b0b0b; border-width: 0 0 2px 2px; transform: translateY(-1px) rotate(-45deg); }
+.login-steps.compact { grid-template-columns: repeat(3, 1fr); }
+.login-steps.compact li { flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
+.login-steps.compact small { display: none; }
+.login-status { display: flex; align-items: center; gap: 10px; margin-top: 18px; min-height: 46px; padding: 0 14px; border-radius: 10px; border: 1px solid #1e1e1e; background: #0d0d0d; font-size: 13.5px; color: #cfcfcf; }
+.login-status .grow { flex: 1; min-width: 0; }
+.login-status .ttl { font-family: var(--mono); font-size: 12px; color: #6f6f6f; }
+.login-status.wait { border-color: rgb(126 224 108 / 0.35); color: var(--accent-2); }
+.login-status.ok { border-color: rgb(125 220 107 / 0.55); color: var(--up); }
+.login-status.ok svg { width: 16px; height: 16px; }
+.login-status.bad { border-color: var(--red); color: #ff6b70; }
+.login-manual { margin-top: 14px; }
+.login-manual summary { cursor: pointer; font-size: 13px; color: #8a8a8a; list-style: none; text-align: center; }
+.login-manual summary::-webkit-details-marker { display: none; }
+.login-manual summary:hover { color: #fff; }
+.login-manual[open] summary { margin-bottom: 14px; color: #cfcfcf; }
+.login-manual .field { margin-bottom: 10px; }
+.login-manual .field label { font-size: 12.5px; }
+.login-manual .field .box { min-height: 42px; }
+.need-tip { position: relative; display: inline-flex; align-items: center; gap: 9px; margin: -12px 0 18px; padding: 5px 12px 5px 5px; border-radius: 999px; border: 1px solid #262626; background: #111; color: #cfcfcf; font-size: 13px; cursor: help; outline: none; transition: border-color 0.2s, color 0.2s; }
+.need-tip:hover, .need-tip:focus { border-color: #3a3a3a; color: #fff; }
+.need-tip:focus-visible { box-shadow: 0 0 0 3px rgb(126 224 108 / 0.3); }
+.need-tip > i { position: relative; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #0b0b0b; font-style: normal; font-size: 12.5px; font-weight: 700; }
+.need-tip > i::before { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 1.5px solid var(--accent); opacity: 0; animation: tip-ping 2.4s 0.8s ease-out 3; }
+@keyframes tip-ping { 0% { opacity: 0.8; transform: scale(0.8); } 100% { opacity: 0; transform: scale(1.5); } }
+.need-tip-bubble { position: absolute; z-index: 10; left: 0; top: calc(100% + 12px); width: min(330px, 78vw); display: grid; gap: 8px; padding: 16px 18px; border-radius: 14px; background: #1f1f1f; border: 1px solid #2e2e2e; box-shadow: 0 18px 50px rgb(0 0 0 / 0.6); color: #d6d6d6; font-size: 13px; line-height: 1.5; text-align: left; cursor: default; opacity: 0; visibility: hidden; transform: translateY(-6px); transition: opacity 0.2s, transform 0.2s var(--ease), visibility 0.2s; }
+.need-tip-bubble::before { content: ''; position: absolute; left: 11px; top: -7px; width: 12px; height: 12px; background: #1f1f1f; border-left: 1px solid #2e2e2e; border-top: 1px solid #2e2e2e; transform: rotate(45deg); border-top-left-radius: 3px; }
+.need-tip-bubble b { color: #fff; font-size: 14px; font-weight: 600; }
+.need-tip-bubble .need-tip-foot { color: #9a9a9a; font-size: 12.5px; }
+.need-tip-bubble a { color: var(--accent); }
+.need-tip:hover .need-tip-bubble, .need-tip:focus .need-tip-bubble, .need-tip:focus-within .need-tip-bubble { opacity: 1; visibility: visible; transform: none; }
+@media (prefers-reduced-motion: reduce) { .need-tip > i::before { animation: none; } }
 .login-done { text-align: center; }
 .login-done h2 { margin-top: 16px; }
 .check { width: 56px; height: 56px; }
