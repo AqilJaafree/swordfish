@@ -95,7 +95,15 @@
             </article>
 
             <article class="card">
-              <div class="card-head"><h2>Top strategies</h2><button class="link" data-tab="board" type="button">View leaderboard →</button></div>
+              <div class="card-head"><h2>Top strategies</h2>
+                <div class="card-tools">
+                  <div class="seg" id="home-mode">
+                    <button data-mode="paper" class="active" type="button">Paper</button><button data-mode="live" type="button">Live</button>
+                    <span class="seg-ink" aria-hidden="true"></span>
+                  </div>
+                  <button class="link" id="home-view-all" type="button">View leaderboard →</button>
+                </div>
+              </div>
               <div class="table-wrap"><table id="home-board"></table></div>
             </article>
           </section>
@@ -121,9 +129,8 @@
             <p class="welcome" id="mine-welcome">Your custody wallet and bots</p>
             <h1>Your wallet and strategies</h1>
             <article id="login-note" class="card gate" hidden></article>
-            <article id="wallet" class="card" hidden></article>
             <article class="card" id="my-bots-panel" hidden>
-              <div class="card-head"><h2>Deployed strategies</h2><span class="dim small">Paper and live bots on your wallet</span></div>
+              <div class="card-head"><h2>Deployed strategies</h2><button class="btn sm ghost" id="open-wallet" type="button"><i data-icon="wallet"></i>Wallet details</button></div>
               <div id="my-bots" class="bots"></div>
             </article>
             <form id="new-bot" class="card" hidden>
@@ -193,13 +200,9 @@
     </div>
   </div>
 
-  <!-- Bot detail drawer --------------------------------------------------------------- -->
-  <dialog id="detail" class="drawer">
-    <div class="drawer-head">
-      <span class="eyebrow" id="detail-eyebrow">Strategy</span>
-      <form method="dialog"><button class="icon-btn close" aria-label="Close"><i data-icon="x"></i></button></form>
-    </div>
-    <div id="detail-body"></div>
+  <!-- Detail popup: an asset, a bot or a strategy ------------------------------------- -->
+  <dialog id="dm" class="modal wallet-modal" aria-label="Details">
+    <div id="dm-body" class="wv-card"></div>
   </dialog>
 
   <!-- Sign in (Telegram approval) ------------------------------------------------------ -->
@@ -219,6 +222,11 @@
     </div>
   </dialog>
 
+  <!-- Wallet details (opened from the wallet pill) -------------------------------------- -->
+  <dialog id="wallet-dialog" class="modal wallet-modal" aria-label="Wallet details">
+    <div id="wallet" class="wv-card"></div>
+  </dialog>
+
   <!-- Full TradingView chart ---------------------------------------------------------- -->
   <dialog id="tv-dialog" class="modal tv">
     <div class="tv-head">
@@ -232,6 +240,7 @@
   <div id="toast" class="toast" role="status"></div>
 
   <script src="https://unpkg.com/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
   <script src="/app.js" type="module"></script>
 </body>
 </html>
