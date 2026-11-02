@@ -41,6 +41,10 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS tokens (
     token TEXT PRIMARY KEY, kind TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS invites (
+    id INTEGER PRIMARY KEY, kind TEXT NOT NULL, value TEXT NOT NULL, note TEXT, tg_id TEXT, created_at TEXT NOT NULL, joined_at TEXT,
+    UNIQUE(kind, value)
+  );
 `)
 
 // Added after the first release: one-sided LP state for lp-range bots (JSON).
@@ -140,3 +144,36 @@ export function useToken(token, kind, { consume = false } = {}) {
   return row ? getUser(row.user_id) : null
 }
 export const revokeToken = (token) => db.prepare('DELETE FROM tokens WHERE token = ?').run(String(token))
+
+// --- invites (managed on the private invite page) ------------------------------
+// kind 'username' stores the lowercased name without @; kind 'phone' stores digits only.
+// tg_id is filled the first time the invited person reaches the bot, so access then
+// follows the Telegram account even if the username changes.
+
+export const hasInvites = () => Boolean(db.prepare('SELECT 1 FROM invites LIMIT 1').get())
+export const listInvites = () => db.prepare(`SELECT i.*, u.username AS joined_as FROM invites i
+  LEFT JOIN users u ON u.tg_id = i.tg_id ORDER BY i.id DESC`).all()
+export function addInvite(kind, value, note) {
+  db.prepare('INSERT OR IGNORE INTO invites (kind, value, note, created_at) VALUES (?, ?, ?, ?)').run(kind, value, note || null, now())
+  return db.prepare('SELECT * FROM invites WHERE kind = ? AND value = ?').get(kind, value)
+}
+export const removeInvite = (id) => db.prepare('DELETE FROM invites WHERE id = ?').run(id).changes
+
+export function inviteAllows(tgId, username) {
+  const row = db.prepare(`SELECT * FROM invites WHERE tg_id = ?
+    OR (tg_id IS NULL AND kind = 'username' AND value = ?) LIMIT 1`).get(String(tgId), String(username ?? '').toLowerCase())
+  if (row && !row.tg_id) db.prepare('UPDATE invites SET tg_id = ?, joined_at = ? WHERE id = ?').run(String(tgId), now(), row.id)
+  return Boolean(row)
+}
+
+// Telegram reports numbers with the country code; an invite typed in local form
+// (leading 0, no country code) still matches on its trailing digits.
+export function claimPhoneInvite(phoneDigits, tgId) {
+  const rows = db.prepare("SELECT * FROM invites WHERE kind = 'phone' AND tg_id IS NULL").all()
+  const row = rows.find((r) => {
+    const want = r.value.replace(/^0+/, '')
+    return want.length >= 8 && phoneDigits.endsWith(want)
+  })
+  if (row) db.prepare('UPDATE invites SET tg_id = ?, joined_at = ? WHERE id = ?').run(String(tgId), now(), row.id)
+  return Boolean(row)
+}

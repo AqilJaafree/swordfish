@@ -1,8 +1,9 @@
 // Telegram front end (grammY, long polling). Each Telegram user gets a
 // custodial HashKey wallet and can run paper or live bots.
 
-import { Bot, GrammyError, HttpError, InlineKeyboard } from 'grammy'
-import { config, telegramAllowed } from './config.mjs'
+import { Bot, GrammyError, HttpError, InlineKeyboard, Keyboard } from 'grammy'
+import { config } from './config.mjs'
+import { telegramAllowed } from './access.mjs'
 import * as db from './db.mjs'
 import { catalog, closeBot, createBotFor, deleteBot, deleteWallet, events, goLive, importWallet, ownedBot, RISK_DEFAULTS, setStatus, walletBalances, withdraw, withdrawAll } from './engine.mjs'
 import { createWallet, exportKey } from './vault.mjs'
@@ -183,16 +184,23 @@ export function startTelegram({ start = true, botInfo } = {}) {
     })
   }
 
-  // Only allowlisted accounts (TELEGRAM_ALLOWED_USERS) can use the bot.
+  // Only the operator (TELEGRAM_ALLOWED_USERS) and invited people can use the bot. Someone
+  // invited by phone number proves it by sharing their own contact with the button below.
   bot.use(async (ctx, next) => {
-    if (!ctx.from || !telegramAllowed(ctx.from.id, ctx.from.username)) {
-      // Show the ID so the person can pass it to whoever runs this bot to be added.
-      if (ctx.chat?.type === 'private' && ctx.from) {
-        await reply(ctx, `Swordfish is invite-only for now.\n\nTo get access, send this to the person who invited you:\n<code>${ctx.from.id}</code>${ctx.from.username ? ` (@${ctx.from.username})` : ''}`)
+    if (!ctx.from) return
+    if (telegramAllowed(ctx.from.id, ctx.from.username)) return next()
+    if (ctx.chat?.type !== 'private') return
+    const contact = ctx.message?.contact
+    if (contact) {
+      if (contact.user_id !== ctx.from.id) return reply(ctx, 'Please share <b>your own</b> number with the button below.')
+      if (db.claimPhoneInvite(String(contact.phone_number).replace(/\D/g, ''), ctx.from.id)) {
+        await reply(ctx, "✅ You're in. Welcome to Swordfish.", { reply_markup: { remove_keyboard: true } })
+        return send(ctx, menuScreen(userOf(ctx)))
       }
-      return
+      return reply(ctx, "That number isn't on the invite list yet. Ask the person who invited you to add it, then tap the button again.")
     }
-    return next()
+    await reply(ctx, `Swordfish is invite-only for now.\n\nInvited by phone number? Tap <b>📱 Share my phone number</b> below.\n\nOtherwise, send this to the person who invited you:\n<code>${ctx.from.id}</code>${ctx.from.username ? ` (@${esc(ctx.from.username)})` : ''}`,
+      { reply_markup: new Keyboard().requestContact('📱 Share my phone number').resized().oneTime() })
   })
 
   // Wallet and bot commands only work in a private chat with the bot.

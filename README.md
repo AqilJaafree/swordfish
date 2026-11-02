@@ -28,6 +28,10 @@ To preview the landing page independently, run `npm run landing` and open http:/
 
 Sections enter with staggered heading, card, chart, and software-layer animations. Entrances replay only after leaving the viewport completely, preserve native scrolling, and show all content immediately when animations are paused or reduced motion is enabled.
 
+## Inviting people
+
+The bot is invite-only when `TELEGRAM_ALLOWED_USERS` (the owner accounts) is set. Set `ADMIN_TOKEN` and open `/invite/<ADMIN_TOKEN>`: that private link is a form for inviting people by Telegram username or phone number, and lists who has joined. Invites are stored in the database and apply immediately. Someone invited by phone taps **Share my phone number** in the bot once, since Telegram only shows a bot a number its owner chooses to share. Removing an invite revokes bot and dashboard access.
+
 ## Telegram commands
 
 | Command | |

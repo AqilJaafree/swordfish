@@ -33,11 +33,13 @@
 //   POST /api/me/bots              (session) { strategy, assets, timeframe, params } -> paper bot
 //   POST /api/bots/:id/stop        (session) also /resume, /delete
 
+import { timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { assets, findAsset } from './assets.mjs'
 import { getCandles, startSampler, TIMEFRAMES } from './candles.mjs'
-import { config, telegramAllowed } from './config.mjs'
+import { config } from './config.mjs'
+import { telegramAllowed } from './access.mjs'
 import { quoteOrder } from './execution.mjs'
 import * as paper from './paper.mjs'
 import { getPrice } from './pricing.mjs'
@@ -130,6 +132,32 @@ function paperOnly() {
 }
 
 const HOME_COOKIE = 'sf_home=app; Path=/; Max-Age=31536000; SameSite=Lax'
+
+// Invite page: the unguessable ADMIN_TOKEN in the URL is the only credential.
+function adminOnly(token) {
+  const want = Buffer.from(config.adminToken), got = Buffer.from(String(token))
+  if (!config.adminToken || want.length !== got.length || !timingSafeEqual(want, got)) throw httpError(404, 'Not found')
+}
+const PRIVATE = { 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer' }
+function parseInvite({ kind, value, note }) {
+  const v = String(value ?? '').trim()
+  if (kind === 'username') {
+    const name = v.replace(/^@/, '').replace(/^https?:\/\/t\.me\//, '').toLowerCase()
+    if (!/^[a-z0-9_]{4,32}$/.test(name)) throw httpError(400, 'Telegram usernames are 4-32 letters, numbers or underscores')
+    return { kind, value: name, note: String(note ?? '').trim().slice(0, 80) }
+  }
+  if (kind === 'phone') {
+    const digits = v.replace(/\D/g, '')
+    if (digits.replace(/^0+/, '').length < 8 || digits.length > 15) throw httpError(400, 'Enter the full phone number, ideally with the country code')
+    return { kind, value: digits, note: String(note ?? '').trim().slice(0, 80) }
+  }
+  throw httpError(400, 'Choose username or phone')
+}
+const inviteList = () => ({
+  bot: config.telegramUsername ?? null,
+  operators: config.telegramAllowed.length,
+  invites: db.listInvites().map((i) => ({ id: i.id, kind: i.kind, value: i.value, note: i.note, createdAt: i.created_at, joinedAt: i.joined_at, joinedAs: i.joined_as })),
+})
 const page = (name) => readFile(new URL(`../public/${name}`, import.meta.url))
 
 const routes = [
@@ -137,6 +165,22 @@ const routes = [
     ctx.cookies.sf_home === 'app'
       ? raw(302, { location: '/app' }, '')
       : raw(200, { 'content-type': 'text/html; charset=utf-8' }, await page('landing.html'))],
+  ['/invite/:token', async ({ token }) => {
+    adminOnly(token)
+    return raw(200, { 'content-type': 'text/html; charset=utf-8', ...PRIVATE }, await page('invite.html'))
+  }],
+  ['/api/invite/:token', async ({ token }) => (adminOnly(token), inviteList())],
+  ['/api/invite/:token', async ({ token }, _, body) => {
+    adminOnly(token)
+    const invite = parseInvite(body ?? {})
+    db.addInvite(invite.kind, invite.value, invite.note)
+    return inviteList()
+  }, 'POST'],
+  ['/api/invite/:token/remove', async ({ token }, _, body) => {
+    adminOnly(token)
+    db.removeInvite(Number(body?.id))
+    return inviteList()
+  }, 'POST'],
   ['/app', async () => raw(200, { 'content-type': 'text/html; charset=utf-8', 'set-cookie': HOME_COOKIE }, await page('index.html'))],
   ...Object.entries(STATIC).map(([path, [name, type]]) => [path, staticFile(name, type)]),
   ['/landing-media/:asset', async ({ asset }, _, __, ctx) => {

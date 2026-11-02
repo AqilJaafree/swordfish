@@ -54,6 +54,8 @@ export const config = {
   },
   telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
   // Comma-separated Telegram usernames or numeric user IDs; empty = anyone.
+  // Private invite page lives at /invite/<ADMIN_TOKEN>; unset disables it.
+  adminToken: process.env.ADMIN_TOKEN || '',
   telegramAllowed: (process.env.TELEGRAM_ALLOWED_USERS || '').split(',').map((u) => u.trim().replace(/^@/, '').toLowerCase()).filter(Boolean),
   webUrl: process.env.WEB_URL || `http://localhost:${num(process.env.PORT, 8787)}`,
 
@@ -76,8 +78,3 @@ export function envParamsFor(name, scope = 'TA') {
   return params
 }
 
-/** Whether a Telegram user (numeric id plus username) may use the bots. */
-export function telegramAllowed(tgId, username) {
-  const list = config.telegramAllowed
-  return !list.length || list.includes(String(tgId)) || (!!username && list.includes(String(username).toLowerCase()))
-}
