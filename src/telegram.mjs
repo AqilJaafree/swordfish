@@ -7,6 +7,7 @@ import * as db from './db.mjs'
 import { catalog, closeBot, createBotFor, deleteBot, deleteWallet, events, goLive, importWallet, ownedBot, RISK_DEFAULTS, setStatus, walletBalances, withdraw, withdrawAll } from './engine.mjs'
 import { createWallet, exportKey } from './vault.mjs'
 import { findAsset } from './assets.mjs'
+import { approveLogin, denyLogin, loginPending } from './auth.mjs'
 
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
 const usd = (n) => (n == null ? '-' : `$${Number(n).toFixed(2)}`)
@@ -63,6 +64,14 @@ function menuScreen(user) {
       .text('➕ New bot', 'm:new').text('📚 Strategies', 'm:strategies').row()
       .text('🏆 Leaderboard', 'lb:paper').text('🌐 Dashboard', 'm:web').row()
       .text('❓ Help', 'm:help'),
+  }
+}
+
+function loginScreen(code) {
+  if (!loginPending(code)) return { text: 'This sign-in request has expired. Click <b>Log in</b> on the dashboard to start again.', kb: new InlineKeyboard().text('📋 Menu', 'm:menu') }
+  return {
+    text: '🔐 <b>Dashboard sign-in</b>\nA browser asked to sign in to Swordfish as you.\n\nApprove only if you just clicked <b>Log in</b> on your own dashboard. The request expires in 10 minutes.',
+    kb: new InlineKeyboard().text('✅ Approve sign-in', `auth:${code}`).text('Cancel', `authx:${code}`),
   }
 }
 
@@ -197,7 +206,12 @@ export function startTelegram({ start = true, botInfo } = {}) {
     return next()
   })
 
-  bot.command(['start', 'menu'], (ctx) => send(ctx, menuScreen(userOf(ctx))))
+  // /start login_<code> comes from the dashboard's Log in button.
+  bot.command(['start', 'menu'], (ctx) => {
+    const user = userOf(ctx)
+    const payload = args(ctx)[0] ?? ''
+    return send(ctx, payload.startsWith('login_') ? loginScreen(payload.slice(6)) : menuScreen(user))
+  })
   bot.command('help', (ctx) => reply(ctx, HELP, { reply_markup: new InlineKeyboard().text('📋 Menu', 'm:menu') }))
   bot.command('wallet', async (ctx) => send(ctx, await walletScreen(userOf(ctx))))
   bot.command('strategies', (ctx) => send(ctx, strategiesScreen()))
@@ -356,6 +370,18 @@ export function startTelegram({ start = true, botInfo } = {}) {
         if (a === 'strategies') return void (await show(ctx, strategiesScreen()))
         if (a === 'help') return void (await reply(ctx, HELP))
         if (a === 'web') return void (await webLink(ctx))
+      }
+      if (kind === 'auth') {
+        const ok = approveLogin(a, user.id)
+        await ctx.answerCallbackQuery({ text: ok ? 'Signed in' : 'Request expired' })
+        return void (await show(ctx, ok
+          ? { text: '✅ <b>Signed in.</b> Your dashboard is connected; switch back to your browser.', kb: new InlineKeyboard().text('📋 Menu', 'm:menu') }
+          : loginScreen(a)))
+      }
+      if (kind === 'authx') {
+        denyLogin(a)
+        await ctx.answerCallbackQuery({ text: 'Sign-in cancelled' })
+        return void (await show(ctx, { text: 'Sign-in cancelled. No browser was given access.', kb: new InlineKeyboard().text('📋 Menu', 'm:menu') }))
       }
       if (kind === 'lb') return void (await show(ctx, leaderboardScreen(a === 'live' ? 'live' : 'paper')))
       if (kind === 'n') {

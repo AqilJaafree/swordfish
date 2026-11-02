@@ -4,86 +4,234 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Swordfish</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header>
-    <div class="brand"><span class="logo">◆</span> Swordfish <span class="muted">· strategy bots on HashKey Chain</span></div>
-    <div id="account"></div>
-  </header>
-  <nav>
-    <button data-tab="leaderboard" class="active">Leaderboard</button>
-    <button data-tab="mine">My bots</button>
-    <button data-tab="strategies">Strategies</button>
-  </nav>
-  <main>
-    <section id="leaderboard">
-      <div class="row">
-        <h2>Leaderboard</h2>
-        <div class="toggle" id="mode">
-          <button data-mode="paper" class="active">Paper</button>
-          <button data-mode="live">Live</button>
-        </div>
+  <div class="app" id="app">
+    <!-- Sidebar ------------------------------------------------------------------ -->
+    <aside class="side">
+      <div class="side-head">
+        <a class="brand" href="#" data-tab="leaderboard"><i data-icon="bolt" class="brand-bolt"></i><span>Swordfish</span></a>
+        <button class="icon-btn plain" id="side-toggle" type="button" aria-label="Collapse sidebar"><i data-icon="panel"></i></button>
       </div>
-      <p class="muted">Ranked by P&amp;L after costs: cash plus what positions would sell for in the pools now, minus gas.</p>
-      <div class="table-wrap"><table id="board"></table></div>
-    </section>
+      <div class="search">
+        <i data-icon="search"></i>
+        <input id="search" type="search" placeholder="Search assets, strategies…" autocomplete="off" aria-label="Search">
+        <div class="search-results" id="search-results" hidden></div>
+      </div>
+      <hr>
+      <nav id="tabs" class="nav">
+        <button data-tab="leaderboard" class="active" type="button"><i data-icon="home"></i><span>Home</span></button>
+        <button data-tab="board" type="button"><i data-icon="trophy"></i><span>Leaderboard</span></button>
+        <button data-tab="mine" type="button"><i data-icon="wallet"></i><span>Portfolio</span></button>
+        <button data-tab="strategies" type="button"><i data-icon="compass"></i><span>Strategies</span></button>
+      </nav>
+      <hr>
+      <nav class="nav secondary">
+        <a id="help-link" href="#" target="_blank"><i data-icon="help"></i><span>Telegram bot</span></a>
+        <a href="https://github.com/AqilJaafree/swordfish" target="_blank"><i data-icon="code"></i><span>Source code</span></a>
+      </nav>
+      <div class="side-foot">
+        <button id="side-auth" class="nav-btn" type="button"><i data-icon="login"></i><span>Log in</span></button>
+        <p class="credit">Charts by <a href="https://www.tradingview.com/" target="_blank">TradingView</a></p>
+      </div>
+    </aside>
 
-    <section id="mine" hidden>
-      <div id="login-note" class="card" hidden></div>
-      <div id="wallet" class="card" hidden></div>
-      <div class="row"><h2>My bots</h2></div>
-      <div id="my-bots" class="grid"></div>
-      <form id="new-bot" class="card" hidden>
-        <h3>New paper bot</h3>
-        <label>Strategy <select name="strategy"></select></label>
-        <fieldset><legend>Assets (up to 5)</legend><div id="asset-picks" class="picks"></div></fieldset>
-        <label>Timeframe
-          <select name="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
-        </label>
-        <div class="params">
-          <label>Trade size $ <input name="tradeUsd" type="number" min="1" step="1" placeholder="20"></label>
-          <label>Stop loss % <input name="stopLossPct" type="number" min="0" step="0.5" placeholder="off"></label>
-          <label>Take profit % <input name="takeProfitPct" type="number" min="0" step="0.5" placeholder="off"></label>
-          <label>Trailing stop % <input name="trailingStopPct" type="number" min="0" step="0.5" placeholder="off"></label>
+    <div class="main">
+      <!-- Top bar: live market line, network, wallet ------------------------------- -->
+      <header class="top">
+        <div class="breaking"><span class="breaking-label">Live</span><div class="breaking-view"><div class="breaking-track" id="tape"></div></div></div>
+        <div class="top-right">
+          <div class="net" title="HashKey Chain mainnet, latest block"><span class="pulse"></span><span id="block">#—</span></div>
+          <div id="account"></div>
+          <a class="bolt-btn" id="bolt" href="#" target="_blank" title="Open the Swordfish Telegram bot"><i data-icon="bolt"></i></a>
         </div>
-        <button type="submit" class="primary">Create bot</button>
-        <p class="muted small">Bots start on paper. Switch one to real funds in Telegram with <code>/live &lt;id&gt; &lt;budget&gt;</code>.</p>
-        <p id="form-error" class="error"></p>
-      </form>
-    </section>
+      </header>
 
-    <section id="strategies" hidden>
-      <h2>Strategies</h2>
-      <form id="preview" class="card">
-        <h3>Strategy preview</h3>
-        <p class="muted small">Pick a strategy and an asset to see what it watches and where it would have bought and sold.</p>
-        <div class="params">
-          <label>Strategy <select name="strategy"></select></label>
-          <label>Asset <select name="asset"></select></label>
-          <label>Timeframe
-            <select name="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
-          </label>
-          <label>Stop loss % <input name="stopLossPct" type="number" min="0" step="0.5" placeholder="off"></label>
-          <label>Take profit % <input name="takeProfitPct" type="number" min="0" step="0.5" placeholder="off"></label>
-          <label>Trailing stop % <input name="trailingStopPct" type="number" min="0" step="0.5" placeholder="off"></label>
-        </div>
-        <div id="preview-legend" class="legend"></div>
-        <div id="preview-chart" class="chart"></div>
-        <div id="preview-pane" class="chart pane" hidden></div>
-        <div id="preview-stats" class="stats"></div>
-        <p class="muted small" id="preview-note"></p>
-        <div class="row">
-          <button type="button" id="preview-create" class="primary">Create paper bot with these settings</button>
-          <span id="preview-msg" class="small"></span>
-        </div>
-      </form>
-      <div id="strategy-list" class="grid"></div>
-    </section>
-  </main>
+      <div class="body">
+        <main class="content">
+          <!-- Home ---------------------------------------------------------------- -->
+          <section id="leaderboard" class="view">
+            <div class="crumb"><i data-icon="home"></i><span>Home</span></div>
+            <p class="welcome" id="welcome">Welcome to Swordfish</p>
+            <h1>Latest markets for you</h1>
+            <div class="toolbar">
+              <div class="pills" id="mc-asset"></div>
+              <label class="sort"><span>Timeframe</span>
+                <select id="mc-tf"><option value="1h">1H</option><option value="4h">4H</option><option value="1d">1D</option></select>
+              </label>
+            </div>
 
-  <dialog id="detail"><div id="detail-body"></div><form method="dialog"><button class="close">Close</button></form></dialog>
-  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+            <article class="card post" id="pulse"></article>
+
+            <article class="card asset">
+              <div class="asset-head">
+                <div class="coin" id="ac-icon"></div>
+                <div class="asset-id">
+                  <div class="asset-title"><b id="ac-sym">—</b><span id="ac-name"></span></div>
+                  <div class="tags" id="ac-tags"></div>
+                </div>
+                <div class="asset-px"><b id="ac-px">—</b><span class="badge" id="ac-chg"></span></div>
+              </div>
+              <blockquote id="ac-desc"></blockquote>
+              <div class="chart-box">
+                <div class="mchart-legend" id="mc-legend"></div>
+                <div class="seg chart-type" id="mc-type">
+                  <button data-type="area" class="active" type="button">Line</button><button data-type="candles" type="button">Candles</button>
+                  <span class="seg-ink" aria-hidden="true"></span>
+                </div>
+                <div id="mc-chart" class="mchart-canvas"></div>
+                <div class="tip" id="mc-tip" hidden></div>
+                <div class="loading" id="mc-loading"><span></span></div>
+                <p class="mchart-empty" id="mc-empty" hidden></p>
+              </div>
+              <div class="pair">
+                <button class="btn glossy" id="ac-backtest" type="button">Backtest a strategy</button>
+                <button class="btn flat" id="mc-tv" type="button">Open in TradingView</button>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-head"><h2>Top strategies</h2><button class="link" data-tab="board" type="button">View leaderboard →</button></div>
+              <div class="table-wrap"><table id="home-board"></table></div>
+            </article>
+          </section>
+
+          <!-- Leaderboard --------------------------------------------------------- -->
+          <section id="board-view" class="view" hidden data-view="board">
+            <div class="crumb"><i data-icon="trophy"></i><span>Leaderboard</span></div>
+            <p class="welcome">Ranked by P&amp;L after costs: cash plus what positions would sell for in the pools now, minus gas.</p>
+            <h1>Strategy leaderboard</h1>
+            <div class="toolbar">
+              <div class="pills" id="mode">
+                <button data-mode="paper" class="active" type="button"><i data-icon="layers"></i>Paper</button>
+                <button data-mode="live" type="button"><i data-icon="signal"></i>Live</button>
+              </div>
+              <span class="sort static"><span>Sort by</span><b>P&amp;L after costs</b></span>
+            </div>
+            <article class="card flush"><div class="table-wrap"><table id="board"></table></div></article>
+          </section>
+
+          <!-- Portfolio ----------------------------------------------------------- -->
+          <section id="mine" class="view" hidden>
+            <div class="crumb"><i data-icon="wallet"></i><span>Portfolio</span></div>
+            <p class="welcome" id="mine-welcome">Your custody wallet and bots</p>
+            <h1>Your wallet and strategies</h1>
+            <article id="login-note" class="card gate" hidden></article>
+            <article id="wallet" class="card" hidden></article>
+            <article class="card" id="my-bots-panel" hidden>
+              <div class="card-head"><h2>Deployed strategies</h2><span class="dim small">Paper and live bots on your wallet</span></div>
+              <div id="my-bots" class="bots"></div>
+            </article>
+            <form id="new-bot" class="card" hidden>
+              <div class="card-head"><h2>Deploy a paper strategy</h2></div>
+              <p class="dim small lead">New bots always start on paper. Move one to real funds in Telegram with <code>/live &lt;id&gt; &lt;budget&gt;</code>.</p>
+              <div class="form-grid">
+                <label>Strategy <select name="strategy"></select></label>
+                <label>Timeframe
+                  <select name="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
+                </label>
+                <label>Trade size (USD) <input name="tradeUsd" type="number" min="1" step="1" placeholder="20"></label>
+                <label>Stop loss % <input name="stopLossPct" type="number" min="0" step="0.5" placeholder="Off"></label>
+                <label>Take profit % <input name="takeProfitPct" type="number" min="0" step="0.5" placeholder="Off"></label>
+                <label>Trailing stop % <input name="trailingStopPct" type="number" min="0" step="0.5" placeholder="Off"></label>
+              </div>
+              <fieldset><legend>Universe <span class="dim">· up to 5 assets</span></legend><div id="asset-picks" class="picks"></div></fieldset>
+              <div class="form-foot">
+                <p id="form-error" class="error"></p>
+                <button type="submit" class="btn glossy">Deploy on paper</button>
+              </div>
+            </form>
+          </section>
+
+          <!-- Strategies ---------------------------------------------------------- -->
+          <section id="strategies" class="view" hidden>
+            <div class="crumb"><i data-icon="compass"></i><span>Strategies</span></div>
+            <p class="welcome">Replay any model on recent candles before you deploy it</p>
+            <h1>Strategy catalogue</h1>
+            <div class="toolbar">
+              <div class="pills" id="strat-filter"></div>
+              <span class="sort static"><span>Fees</span><b>0.3% per swap</b></span>
+            </div>
+            <div id="strategy-list" class="catalog"></div>
+            <form id="preview" class="card">
+              <div class="card-head"><h2>Backtest preview</h2><span class="dim small">Where the model would have entered and exited</span></div>
+              <div class="form-grid">
+                <label>Strategy <select name="strategy"></select></label>
+                <label>Asset <select name="asset"></select></label>
+                <label>Timeframe
+                  <select name="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
+                </label>
+                <label>Stop loss % <input name="stopLossPct" type="number" min="0" step="0.5" placeholder="Off"></label>
+                <label>Take profit % <input name="takeProfitPct" type="number" min="0" step="0.5" placeholder="Off"></label>
+                <label>Trailing stop % <input name="trailingStopPct" type="number" min="0" step="0.5" placeholder="Off"></label>
+              </div>
+              <div id="preview-stats" class="stats"></div>
+              <div id="preview-legend" class="legend"></div>
+              <div class="chart-shell"><div id="preview-chart" class="chart"></div><div class="loading" id="preview-loading"><span></span></div></div>
+              <p class="note" id="preview-note"></p>
+              <div class="form-foot">
+                <span id="preview-msg" class="small"></span>
+                <button type="button" id="preview-create" class="btn glossy">Deploy on paper with these settings</button>
+              </div>
+            </form>
+          </section>
+        </main>
+
+        <!-- Right rail ------------------------------------------------------------ -->
+        <aside class="rail">
+          <h3 class="rail-title"><i data-icon="badge"></i>Top strategies</h3>
+          <div id="top-strat" class="pop"></div>
+          <div class="dots" id="top-dots"></div>
+          <h3 class="rail-title"><i data-icon="bolt-line"></i>Hot assets</h3>
+          <div id="hot" class="hot"></div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bot detail drawer --------------------------------------------------------------- -->
+  <dialog id="detail" class="drawer">
+    <div class="drawer-head">
+      <span class="eyebrow" id="detail-eyebrow">Strategy</span>
+      <form method="dialog"><button class="icon-btn close" aria-label="Close"><i data-icon="x"></i></button></form>
+    </div>
+    <div id="detail-body"></div>
+  </dialog>
+
+  <!-- Sign in (Telegram approval) ------------------------------------------------------ -->
+  <dialog id="login-dialog" class="auth">
+    <div class="auth-art">
+      <div class="auth-logo"><i data-icon="bolt"></i><span>Swordfish</span></div>
+      <div class="auth-float" id="auth-float"></div>
+      <svg class="auth-chart" id="auth-chart" aria-hidden="true"></svg>
+      <div class="auth-copy">
+        <p>One Platform. Full Control</p>
+        <h2>Trade, Backtest, and Automate Strategies Without Extra Steps</h2>
+      </div>
+    </div>
+    <div class="auth-form">
+      <form method="dialog" class="auth-close"><button class="icon-btn plain" aria-label="Close"><i data-icon="x"></i></button></form>
+      <div id="login-body"></div>
+    </div>
+  </dialog>
+
+  <!-- Full TradingView chart ---------------------------------------------------------- -->
+  <dialog id="tv-dialog" class="modal tv">
+    <div class="tv-head">
+      <div><p class="eyebrow">TradingView</p><h2 id="tv-title">Chart</h2></div>
+      <form method="dialog"><button class="icon-btn" aria-label="Close"><i data-icon="x"></i></button></form>
+    </div>
+    <div id="tv-mount" class="tv-mount"></div>
+    <p class="note">Market reference data from TradingView. Swordfish fills use HashKey Chain pool prices, which can differ.</p>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="https://unpkg.com/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js"></script>
   <script src="/app.js" type="module"></script>
 </body>
 </html>
